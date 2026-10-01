@@ -27,3 +27,6 @@ npm-debug.log*
 
 # Original screenshots (renamed copies in /screenshots)
 Screenshot*.png
+
+# Vercel
+.vercel

@@ -1,4 +1,4 @@
-import { createContext, useReducer } from 'react';
+import { createContext, useReducer, useEffect } from 'react';
 import axios from 'axios';
 import { jwtDecode } from 'jwt-decode';
 
@@ -57,6 +57,11 @@ const authReducer = (state, action) => {
         isLoading: false,
         error: action.payload
       };
+    case 'SET_USER':
+      return {
+        ...state,
+        user: action.payload
+      };
     case 'LOGOUT':
       return {
         ...state,
@@ -72,18 +77,47 @@ const authReducer = (state, action) => {
 export const AuthProvider = ({ children }) => {
   const [state, dispatch] = useReducer(authReducer, initialState);
 
+  // Any 401 from an authenticated call (expired token, deactivated account)
+  // signs the user out instead of leaving a half-broken session
+  useEffect(() => {
+    const interceptor = axios.interceptors.response.use(
+      response => response,
+      error => {
+        const url = error.config?.url || '';
+        const isAuthAttempt = url.includes('/api/auth/login') || url.includes('/api/auth/register');
+        if (error.response?.status === 401 && !isAuthAttempt) {
+          localStorage.removeItem('token');
+          delete axios.defaults.headers.common['Authorization'];
+          dispatch({ type: 'LOGOUT' });
+        }
+        return Promise.reject(error);
+      }
+    );
+    return () => axios.interceptors.response.eject(interceptor);
+  }, []);
+
+  // Refresh the profile from the server on load, so name and role changes
+  // made by an admin apply without logging out and back in
+  useEffect(() => {
+    if (!state.isAuthenticated) return;
+    axios.get('/api/auth/me')
+      .then(response => dispatch({ type: 'SET_USER', payload: response.data }))
+      .catch(() => {
+        // 401s are handled by the interceptor; keep the session on network errors
+      });
+  }, [state.isAuthenticated]);
+
   // Login function
   const login = async (credentials) => {
     dispatch({ type: 'LOGIN_START' });
     try {
       const response = await axios.post('/api/auth/login', credentials);
-      const { token } = response.data;
+      const { token, user } = response.data;
       localStorage.setItem('token', token);
-      
+
       // Set axios default header
       axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      
-      const user = jwtDecode(token);
+
       dispatch({ 
         type: 'LOGIN_SUCCESS', 
         payload: user 
@@ -103,13 +137,12 @@ export const AuthProvider = ({ children }) => {
     dispatch({ type: 'REGISTER_START' });
     try {
       const response = await axios.post('/api/auth/register', userData);
-      const { token } = response.data;
+      const { token, user } = response.data;
       localStorage.setItem('token', token);
-      
+
       // Set axios default header
       axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      
-      const user = jwtDecode(token);
+
       dispatch({ 
         type: 'REGISTER_SUCCESS', 
         payload: user 

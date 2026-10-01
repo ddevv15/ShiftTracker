@@ -1,0 +1,8 @@
+# Never upload secrets or local artifacts
+.env
+.env.*
+!.env.example
+**/node_modules
+**/dist
+.playwright-mcp
+.claude

@@ -1,5 +1,13 @@
 const nodemailer = require('nodemailer');
 
+// User-supplied text (names) must not be interpreted as HTML in emails
+const escapeHtml = (value) => String(value ?? '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
+
 // Create a Gmail transporter using App Password
 const transporter = nodemailer.createTransport({
   service: 'gmail',  // Use the Gmail service shorthand
@@ -18,6 +26,11 @@ const transporter = nodemailer.createTransport({
  * @returns {Promise} - Resolves with info about the sent email
  */
 const sendEmail = async (to, subject, text, html) => {
+  // Email notifications are optional; skip quietly when not configured
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_APP_PASSWORD) {
+    return { skipped: true };
+  }
+
   try {
     // Email options
     const mailOptions = {
@@ -47,24 +60,27 @@ const sendEmail = async (to, subject, text, html) => {
  */
 const sendShiftStartEmail = async (user, shift) => {
   const subject = 'Shift Started - ShiftTracker';
-  
+  const locationText = shift.location
+    ? `Latitude ${shift.location.latitude.toFixed(6)}, Longitude ${shift.location.longitude.toFixed(6)}`
+    : 'Not recorded';
+
   const text = `
 Hello ${user.name},
 
 This is a confirmation that your shift has started at ${new Date(shift.startTime).toLocaleString()}.
 
-Location: Latitude ${shift.location.latitude.toFixed(6)}, Longitude ${shift.location.longitude.toFixed(6)}
+Location: ${locationText}
 
 Thank you for using ShiftTracker!
   `;
-  
+
   const html = `
 <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
   <h2 style="color: #0284c7;">Shift Started</h2>
-  <p>Hello <strong>${user.name}</strong>,</p>
+  <p>Hello <strong>${escapeHtml(user.name)}</strong>,</p>
   <p>This is a confirmation that your shift has started at <strong>${new Date(shift.startTime).toLocaleString()}</strong>.</p>
   <div style="margin: 20px 0; padding: 15px; background-color: #f0f9ff; border-left: 4px solid #0284c7; border-radius: 4px;">
-    <p style="margin: 0;"><strong>Location:</strong> Latitude ${shift.location.latitude.toFixed(6)}, Longitude ${shift.location.longitude.toFixed(6)}</p>
+    <p style="margin: 0;"><strong>Location:</strong> ${locationText}</p>
   </div>
   <p>Thank you for using ShiftTracker!</p>
 </div>
@@ -121,7 +137,7 @@ Thank you for using ShiftTracker!
   const html = `
 <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
   <h2 style="color: #0284c7;">Shift Ended</h2>
-  <p>Hello <strong>${user.name}</strong>,</p>
+  <p>Hello <strong>${escapeHtml(user.name)}</strong>,</p>
   <p>This is a confirmation that your shift has ended at <strong>${endTime.toLocaleString()}</strong>.</p>
   
   <div style="margin: 20px 0; padding: 15px; background-color: #f0f9ff; border-left: 4px solid #0284c7; border-radius: 4px;">

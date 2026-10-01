@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "npm ci --prefix time-tracker-webapp-backend && npm ci --prefix time-tracker-webapp-frontend",
+  "buildCommand": "npm run build --prefix time-tracker-webapp-frontend",
+  "outputDirectory": "time-tracker-webapp-frontend/dist",
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "/api" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ]
+}

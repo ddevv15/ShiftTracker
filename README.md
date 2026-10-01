@@ -120,7 +120,7 @@ The frontend runs on `http://localhost:5173` by default.
 ### Authentication
 | Method | Endpoint | Description |
 |---|---|---|
-| POST | `/api/auth/register` | Register a new user |
+| POST | `/api/auth/register` | Admin setup only: emails in `ADMIN_EMAILS` register as admins; everyone else gets 403 |
 | POST | `/api/auth/login` | Login |
 | GET | `/api/auth/me` | Get current user profile |
 
@@ -139,27 +139,65 @@ The frontend runs on `http://localhost:5173` by default.
 | Method | Endpoint | Description |
 |---|---|---|
 | GET | `/api/admin/employees` | List all employees |
+| POST | `/api/admin/employees` | Create an employee account (`name`, `email`, `password`, `role`) |
 | PUT | `/api/admin/employees/role` | Update employee role |
-| PUT | `/api/admin/employees/status` | Toggle employee status |
-| GET | `/api/admin/shifts` | List all shifts |
-| GET | `/api/admin/shifts/:employeeId` | Get employee shifts |
+| PUT | `/api/admin/employees/status` | Activate/deactivate employee |
+| PUT | `/api/admin/employees/password` | Reset an employee's password |
+| GET | `/api/admin/shifts` | List shifts; filter with `employeeId`, `from`, `to` (ISO); paginated with `page`, `limit` |
+| GET | `/api/admin/shifts/export` | CSV of all matching shifts (same filters, plus `tz` for local times) |
+| PUT | `/api/admin/shifts/:shiftId` | Correct or close a shift (`startTime`, `endTime`, required `note`) |
+
+Admins can't demote or deactivate themselves, and accounts listed in `ADMIN_EMAILS` can't be demoted or deactivated by anyone.
+
+## Team Setup
+
+1. Set `ADMIN_EMAILS=you@company.com` (comma-separated for several) in the backend `.env`.
+2. Open `/register` and create your account with that email. It becomes an admin.
+3. In **Admin Dashboard → Employees**, add each team member with a temporary password and share it with them.
+4. Use **Admin Dashboard → Shifts** to filter by person and date range, close forgotten shifts (a reason is recorded), and export CSVs for payroll.
 
 ## Environment Variables
 
 ### Backend (`time-tracker-webapp-backend/.env`)
-```
-PORT=3001
-MONGODB_URI=mongodb://localhost:27017/shift-tracker
-JWT_SECRET=your_jwt_secret_key_here
-NODE_ENV=development
-EMAIL_USER=your_email@gmail.com
-EMAIL_APP_PASSWORD=your_app_password_here
-```
+
+See [`.env.example`](time-tracker-webapp-backend/.env.example) for the full list.
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `MONGODB_URI` | yes | MongoDB connection string (local or Atlas) |
+| `JWT_SECRET` | yes | 32+ random characters. The server refuses to start without one |
+| `ADMIN_EMAILS` | yes | Comma-separated emails that may use `/register` and are always admins |
+| `NODE_ENV` | | `production` makes the backend serve the built frontend |
+| `REQUIRE_LOCATION` | | `true` blocks clock-in/out without GPS. By default it's optional, and shifts without GPS are flagged "no GPS" for admins |
+| `CORS_ORIGIN` | | Allowed origins when the frontend runs on a different domain |
+| `TRUST_PROXY` | | Set to `1` behind a reverse proxy so login rate limiting sees real client IPs |
+| `MAX_SHIFT_HOURS` / `MAX_EDIT_AGE_DAYS` | | Limits on admin corrections (default 24h / 90 days) |
+| `EMAIL_USER` / `EMAIL_APP_PASSWORD` | | Gmail notifications. Leave blank to disable |
+| `TZ` | | Time zone for times in notification emails |
 
 ### Frontend (`time-tracker-webapp-frontend/.env`)
+
+Only needed in development: `VITE_API_URL=http://localhost:3001` (this is also the default). Don't set it for production builds. The production frontend calls its own origin.
+
+## Running in Production
+
+```bash
+cd time-tracker-webapp-frontend && npm ci && npm run build
+cd ../time-tracker-webapp-backend && npm ci
+NODE_ENV=production npm start   # serves the app and API on PORT
 ```
-VITE_API_URL=http://localhost:3001
-```
+
+### Deploying to Vercel
+
+The repo is set up as a single Vercel project. `vercel.json` builds the frontend as static files, and [`api/index.js`](api/index.js) runs the Express API as a serverless function under `/api`.
+
+1. Import the repo in Vercel and keep the root directory as the repo root. The build settings come from `vercel.json`.
+2. Add these environment variables (Production): `MONGODB_URI`, `JWT_SECRET`, `ADMIN_EMAILS`, plus any optional ones above.
+3. In MongoDB Atlas → **Network Access**, allow `0.0.0.0/0`. Vercel functions don't have fixed IPs.
+
+Login rate limiting is per function instance on Vercel, so treat it as best-effort.
+
+Serve it over **HTTPS**. Browsers only allow GPS on secure origins, so without HTTPS every shift will be "no GPS".
 
 ## License
 

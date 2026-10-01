@@ -15,12 +15,15 @@ const ShiftActions = () => {
   const [error, setError] = useState(null);
   const [showBreakOptions, setShowBreakOptions] = useState(false);
 
+  // Prefer the server's explanation (e.g. location required, already clocked in)
+  const messageFrom = (err, fallback) => err?.response?.data?.message || fallback;
+
   const handleStartShift = async () => {
     try {
       setError(null);
       await startShift();
-    } catch {
-      setError('Failed to start shift. Please check your location permissions.');
+    } catch (err) {
+      setError(messageFrom(err, 'Failed to start shift. Please try again.'));
     }
   };
 
@@ -28,8 +31,8 @@ const ShiftActions = () => {
     try {
       setError(null);
       await endShift();
-    } catch {
-      setError('Failed to end shift. Please try again.');
+    } catch (err) {
+      setError(messageFrom(err, 'Failed to end shift. Please try again.'));
     }
   };
 
@@ -38,8 +41,8 @@ const ShiftActions = () => {
       setError(null);
       await startBreak(type);
       setShowBreakOptions(false);
-    } catch {
-      setError(`Failed to start ${type.toLowerCase()} break. Please try again.`);
+    } catch (err) {
+      setError(messageFrom(err, `Failed to start ${type.toLowerCase()} break. Please try again.`));
     }
   };
 
@@ -47,8 +50,8 @@ const ShiftActions = () => {
     try {
       setError(null);
       await endBreak();
-    } catch {
-      setError('Failed to end break. Please try again.');
+    } catch (err) {
+      setError(messageFrom(err, 'Failed to end break. Please try again.'));
     }
   };
 

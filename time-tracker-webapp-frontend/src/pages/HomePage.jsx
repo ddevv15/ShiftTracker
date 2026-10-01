@@ -84,9 +84,6 @@ const HomePage = () => {
               <Link to="/login" className="btn btn-primary">
                 Login
               </Link>
-              <Link to="/register" className="hidden md:inline-block btn btn-secondary">
-                Register
-              </Link>
             </div>
           </div>
         </div>
@@ -104,10 +101,7 @@ const HomePage = () => {
               Perfect for remote workers, freelancers, and employees on the go.
             </p>
             <div className="flex flex-col sm:flex-row justify-center space-y-4 sm:space-y-0 sm:space-x-4">
-              <Link to="/register" className="btn bg-white text-primary-700 hover:bg-gray-100 focus:ring-white text-lg px-8 py-3">
-                Get Started
-              </Link>
-              <Link to="/login" className="btn bg-transparent border-2 border-white text-white hover:bg-white/10 focus:ring-white text-lg px-8 py-3">
+              <Link to="/login" className="btn bg-white text-primary-700 hover:bg-gray-100 focus:ring-white text-lg px-8 py-3">
                 Sign In
               </Link>
             </div>
@@ -146,10 +140,10 @@ const HomePage = () => {
               Ready to Start Tracking Your Hours?
             </h2>
             <p className="text-xl text-gray-600 dark:text-gray-300 mb-8 max-w-3xl mx-auto">
-              Join ShiftTracker today and take control of your work hours. It's free to use!
+              Your admin will create your account. Sign in with the details they sent you.
             </p>
-            <Link to="/register" className="btn btn-primary text-lg px-8 py-3">
-              Create an Account
+            <Link to="/login" className="btn btn-primary text-lg px-8 py-3">
+              Sign In
             </Link>
           </div>
         </section>

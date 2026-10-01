@@ -142,13 +142,14 @@ const LoginPage = () => {
               <div className="w-full border-t border-gray-200 dark:border-gray-700"></div>
             </div>
             <div className="relative flex justify-center text-sm">
-              <span className="px-4 bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400">New to ShiftTracker?</span>
+              <span className="px-4 bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400">No account yet?</span>
             </div>
           </div>
 
-          <p className="text-center">
-            <Link to="/register" className="text-sm font-medium text-primary-600 hover:text-primary-500 dark:text-primary-400 dark:hover:text-primary-300">
-              Create an account
+          <p className="text-center text-sm text-gray-500 dark:text-gray-400">
+            Ask your admin to create one for you.{' '}
+            <Link to="/register" className="font-medium text-primary-600 hover:text-primary-500 dark:text-primary-400 dark:hover:text-primary-300">
+              Admin setup
             </Link>
           </p>
         </div>

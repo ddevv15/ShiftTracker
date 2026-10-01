@@ -88,7 +88,10 @@ const RegisterPage = () => {
               </div>
             </div>
             <h1 className="text-3xl font-extrabold text-gray-900 dark:text-white">ShiftTracker</h1>
-            <p className="text-gray-500 dark:text-gray-400">Create your account</p>
+            <p className="text-gray-500 dark:text-gray-400">Admin setup</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500">
+              Only emails listed in the server's ADMIN_EMAILS can register here. Employees get accounts from an admin.
+            </p>
           </div>
 
           {/* Error Alert */}

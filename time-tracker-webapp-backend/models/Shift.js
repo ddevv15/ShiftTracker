@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { computeShiftTimes } = require('../utils/shiftTime');
 
 // Location schema
 const locationSchema = new mongoose.Schema({
@@ -29,9 +30,12 @@ const breakSchema = new mongoose.Schema({
   endTime: {
     type: Date
   },
+  // Locations are optional unless REQUIRE_LOCATION=true (enforced in the controller)
   location: {
-    type: locationSchema,
-    required: true
+    type: locationSchema
+  },
+  endLocation: {
+    type: locationSchema
   }
 }, { _id: false });
 
@@ -50,9 +54,13 @@ const shiftSchema = new mongoose.Schema({
   endTime: {
     type: Date
   },
+  // true while the shift is open, removed when closed; backs the unique
+  // index below so an employee can never have two open shifts
+  isOpen: {
+    type: Boolean
+  },
   location: {
-    type: locationSchema,
-    required: true
+    type: locationSchema
   },
   endLocation: {
     type: locationSchema
@@ -72,29 +80,41 @@ const shiftSchema = new mongoose.Schema({
   },
   totalBreakTime: {
     type: Number
+  },
+  // Audit trail for admin corrections (e.g. forgotten clock-outs)
+  editedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  editedAt: {
+    type: Date
+  },
+  editNote: {
+    type: String,
+    trim: true,
+    maxlength: 500
   }
 }, {
   timestamps: true
 });
 
-// Method to calculate total working time
-shiftSchema.methods.calculateWorkingTime = function() {
-  if (!this.endTime) return null;
-  
-  // Calculate total time from start to end
-  const totalTime = this.endTime - this.startTime;
-  
-  // Calculate break time
-  let breakTime = 0;
-  if (this.breaks && this.breaks.length > 0) {
-    breakTime = this.breaks.reduce((total, breakItem) => {
-      if (!breakItem.endTime) return total;
-      return total + (breakItem.endTime - breakItem.startTime);
-    }, 0);
-  }
-  
-  // Working time = total time - break time
-  return totalTime - breakTime;
+shiftSchema.index({ employeeId: 1, startTime: -1 });
+shiftSchema.index(
+  { employeeId: 1 },
+  { unique: true, partialFilterExpression: { isOpen: true }, name: 'one_open_shift_per_employee' }
+);
+
+shiftSchema.pre('save', function(next) {
+  this.isOpen = this.endTime ? undefined : true;
+  next();
+});
+
+// Recalculate and store totals; call before saving a closed shift
+shiftSchema.methods.updateTotals = function() {
+  if (!this.endTime) return;
+  const { totalWorkingTime, totalBreakTime } = computeShiftTimes(this);
+  this.totalWorkingTime = totalWorkingTime;
+  this.totalBreakTime = totalBreakTime;
 };
 
 const Shift = mongoose.model('Shift', shiftSchema);

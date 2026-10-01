@@ -1,20 +1,30 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { isBootstrapAdmin } = require('../utils/adminEmails');
+const { getJwtSecret } = require('../utils/config');
 
 // Helper function to generate JWT
 const generateToken = (id, role) => {
   return jwt.sign(
     { id, role },
-    process.env.JWT_SECRET || 'your-secret-key',
+    getJwtSecret(),
     { expiresIn: '30d' }
   );
 };
 
 // Register a new user
+// Public sign-up is closed: only emails in ADMIN_EMAILS may self-register
+// (as admins). Employees are created by an admin from the dashboard.
 const register = async (req, res, next) => {
   try {
     const { name, email, password } = req.body;
-    
+
+    if (!isBootstrapAdmin(email)) {
+      return res.status(403).json({
+        message: 'Registration is closed. Ask your admin to create an account for you.'
+      });
+    }
+
     // Check if user already exists
     const userExists = await User.findOne({ email });
     
@@ -26,7 +36,8 @@ const register = async (req, res, next) => {
     const user = await User.create({
       name,
       email,
-      password
+      password,
+      role: 'admin'
     });
     
     // Generate JWT
@@ -69,7 +80,13 @@ const login = async (req, res, next) => {
     if (!isMatch) {
       return res.status(401).json({ message: 'Invalid email or password' });
     }
-    
+
+    // Bootstrap admins are always restored to admin on login
+    if (isBootstrapAdmin(user.email) && user.role !== 'admin') {
+      user.role = 'admin';
+      await user.save();
+    }
+
     // Generate JWT
     const token = generateToken(user._id, user.role);
     

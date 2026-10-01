@@ -1,44 +1,89 @@
+const mongoose = require('mongoose');
 const User = require('../models/User');
 const Shift = require('../models/Shift');
+const { computeShiftTimes, formatDuration } = require('../utils/shiftTime');
+const { isBootstrapAdmin } = require('../utils/adminEmails');
+
+const MAX_PAGE_SIZE = 200;
+
+const toPublicUser = (user) => ({
+  _id: user._id,
+  name: user.name,
+  email: user.email,
+  role: user.role,
+  active: user.active,
+  createdAt: user.createdAt
+});
 
 // Get all employees
 const getAllEmployees = async (req, res, next) => {
   try {
-    const employees = await User.find().select('-password');
-    res.json(employees);
+    const employees = await User.find().select('-password').sort({ name: 1 });
+    res.json(employees.map(toPublicUser));
   } catch (error) {
     next(error);
   }
+};
+
+// Create an employee account (public registration is closed)
+const createEmployee = async (req, res, next) => {
+  try {
+    const { name, email, password, role = 'employee' } = req.body;
+
+    if (!['employee', 'admin'].includes(role)) {
+      return res.status(400).json({ message: 'Invalid role' });
+    }
+
+    const existing = await User.findOne({ email: String(email || '').toLowerCase().trim() });
+    if (existing) {
+      return res.status(400).json({ message: 'A user with this email already exists' });
+    }
+
+    const user = await User.create({ name, email, password, role });
+    res.status(201).json(toPublicUser(user));
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Guard against admins locking themselves (or the bootstrap admins) out
+const checkProtectedUser = (req, user) => {
+  if (user._id.equals(req.user._id)) {
+    return 'You cannot change your own role or status';
+  }
+  if (isBootstrapAdmin(user.email)) {
+    return 'This admin is listed in ADMIN_EMAILS and cannot be demoted or deactivated';
+  }
+  return null;
 };
 
 // Update employee role
 const updateEmployeeRole = async (req, res, next) => {
   try {
     const { userId, role } = req.body;
-    
+
     // Validate role
     if (!['employee', 'admin'].includes(role)) {
       return res.status(400).json({ message: 'Invalid role' });
     }
-    
-    // Find user
+    if (!mongoose.isValidObjectId(userId)) {
+      return res.status(400).json({ message: 'Invalid user id' });
+    }
+
     const user = await User.findById(userId);
-    
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
-    
-    // Update role
+
+    const protectedMessage = checkProtectedUser(req, user);
+    if (protectedMessage) {
+      return res.status(400).json({ message: protectedMessage });
+    }
+
     user.role = role;
     await user.save();
-    
-    res.json({
-      id: user._id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      active: user.active
-    });
+
+    res.json(toPublicUser(user));
   } catch (error) {
     next(error);
   }
@@ -48,80 +93,310 @@ const updateEmployeeRole = async (req, res, next) => {
 const toggleEmployeeStatus = async (req, res, next) => {
   try {
     const { userId, active } = req.body;
-    
-    // Find user
+
+    if (typeof active !== 'boolean') {
+      return res.status(400).json({ message: 'active must be true or false' });
+    }
+    if (!mongoose.isValidObjectId(userId)) {
+      return res.status(400).json({ message: 'Invalid user id' });
+    }
+
     const user = await User.findById(userId);
-    
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
-    
-    // Update status
+
+    const protectedMessage = checkProtectedUser(req, user);
+    if (protectedMessage) {
+      return res.status(400).json({ message: protectedMessage });
+    }
+
     user.active = active;
     await user.save();
-    
-    res.json({
-      id: user._id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      active: user.active
-    });
+
+    res.json(toPublicUser(user));
   } catch (error) {
     next(error);
   }
 };
 
-// Get all shifts
+// Reset an employee's password (e.g. a new temporary password)
+const resetEmployeePassword = async (req, res, next) => {
+  try {
+    const { userId, password } = req.body;
+
+    if (!mongoose.isValidObjectId(userId)) {
+      return res.status(400).json({ message: 'Invalid user id' });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Hashed by the User pre-save hook; length validated by the schema
+    user.password = password;
+    await user.save();
+
+    res.json({ message: 'Password updated' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Build a Mongo filter from ?employeeId=&from=&to=
+// from/to are ISO timestamps computed in the admin's own timezone
+const buildShiftFilter = (query) => {
+  const filter = {};
+
+  if (query.employeeId) {
+    if (!mongoose.isValidObjectId(query.employeeId)) {
+      return { error: 'Invalid employee id' };
+    }
+    filter.employeeId = query.employeeId;
+  }
+
+  if (query.from || query.to) {
+    filter.startTime = {};
+    if (query.from) {
+      const from = new Date(query.from);
+      if (isNaN(from)) return { error: 'Invalid from date' };
+      filter.startTime.$gte = from;
+    }
+    if (query.to) {
+      const to = new Date(query.to);
+      if (isNaN(to)) return { error: 'Invalid to date' };
+      filter.startTime.$lt = to;
+    }
+  }
+
+  return { filter };
+};
+
+// Shift plus server-computed durations, so every view agrees
+const withTimes = (shift, now) => {
+  const plain = shift.toObject();
+  const { totalWorkingTime, totalBreakTime } = computeShiftTimes(plain, now);
+  return {
+    ...plain,
+    open: !plain.endTime,
+    workingTime: totalWorkingTime,
+    breakTime: totalBreakTime
+  };
+};
+
+// Get shifts (filterable by employee and date range, paginated)
 const getAllShifts = async (req, res, next) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 50;
+    const { filter, error } = buildShiftFilter(req.query);
+    if (error) {
+      return res.status(400).json({ message: error });
+    }
+
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 25, 1), MAX_PAGE_SIZE);
     const skip = (page - 1) * limit;
-    
-    // Count total shifts
-    const total = await Shift.countDocuments();
-    
-    // Get shifts with pagination
-    const shifts = await Shift.find()
-      .sort({ startTime: -1 })
-      .skip(skip)
-      .limit(limit);
-    
+    const now = new Date();
+
+    const [total, shifts, allMatching] = await Promise.all([
+      Shift.countDocuments(filter),
+      Shift.find(filter)
+        .populate('employeeId', 'name email')
+        .populate('editedBy', 'name')
+        .sort({ startTime: -1 })
+        .skip(skip)
+        .limit(limit),
+      // Lightweight query for the range total across all pages
+      Shift.find(filter).select('startTime endTime breaks').lean()
+    ]);
+
+    const totalWorkingTime = allMatching.reduce(
+      (sum, shift) => sum + computeShiftTimes(shift, now).totalWorkingTime,
+      0
+    );
+
     res.json({
-      shifts,
+      shifts: shifts.map(shift => withTimes(shift, now)),
       page,
-      pages: Math.ceil(total / limit),
-      total
+      pages: Math.max(Math.ceil(total / limit), 1),
+      total,
+      totalWorkingTime,
+      openCount: allMatching.filter(shift => !shift.endTime).length
     });
   } catch (error) {
     next(error);
   }
 };
 
-// Get shifts by employee
-const getEmployeeShifts = async (req, res, next) => {
+// Quote a CSV cell and neutralise spreadsheet formulas
+const csvCell = (value) => {
+  let text = value === null || value === undefined ? '' : String(value);
+  if (/^[=+\-@\t\r]/.test(text)) {
+    text = `'${text}`;
+  }
+  return `"${text.replace(/"/g, '""')}"`;
+};
+
+// Export all matching shifts (no pagination) as CSV
+const exportShiftsCsv = async (req, res, next) => {
   try {
-    const { employeeId } = req.params;
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const skip = (page - 1) * limit;
-    
-    // Count total shifts for employee
-    const total = await Shift.countDocuments({ employeeId });
-    
-    // Get shifts with pagination
-    const shifts = await Shift.find({ employeeId })
-      .sort({ startTime: -1 })
-      .skip(skip)
-      .limit(limit);
-    
-    res.json({
-      shifts,
-      page,
-      pages: Math.ceil(total / limit),
-      total
+    const { filter, error } = buildShiftFilter(req.query);
+    if (error) {
+      return res.status(400).json({ message: error });
+    }
+
+    // Format times in the admin's timezone, not the server's
+    let timeZone = 'UTC';
+    try {
+      if (req.query.tz) {
+        new Intl.DateTimeFormat('en-US', { timeZone: req.query.tz });
+        timeZone = req.query.tz;
+      }
+    } catch {
+      return res.status(400).json({ message: 'Invalid timezone' });
+    }
+
+    const dateFmt = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' });
+    const timeFmt = new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', minute: '2-digit', hour12: false });
+    const now = new Date();
+
+    const shifts = await Shift.find(filter)
+      .populate('employeeId', 'name email')
+      .populate('editedBy', 'name')
+      .sort({ startTime: 1 })
+      .lean();
+
+    const header = [
+      'Employee', 'Email', 'Date', 'Start', 'End', 'Status',
+      'Break (h:m)', 'Worked (h:m)', 'Worked (decimal hours)', 'Breaks',
+      'Start Latitude', 'Start Longitude', 'Edited By', 'Edit Note'
+    ];
+
+    const rows = shifts.map(shift => {
+      const { totalWorkingTime, totalBreakTime } = computeShiftTimes(shift, now);
+      const start = new Date(shift.startTime);
+      return [
+        shift.employeeId?.name || 'Deleted user',
+        shift.employeeId?.email || '',
+        dateFmt.format(start),
+        timeFmt.format(start),
+        shift.endTime ? timeFmt.format(new Date(shift.endTime)) : '',
+        shift.endTime ? 'Closed' : 'Open',
+        formatDuration(totalBreakTime),
+        formatDuration(totalWorkingTime),
+        (totalWorkingTime / (1000 * 60 * 60)).toFixed(2),
+        (shift.breaks || []).length,
+        shift.location?.latitude?.toFixed(6) ?? '',
+        shift.location?.longitude?.toFixed(6) ?? '',
+        shift.editedBy?.name || '',
+        shift.editNote || ''
+      ].map(csvCell).join(',');
     });
+
+    const csv = [header.map(csvCell).join(','), ...rows].join('\n');
+    const filename = `shifts_export_${new Date().toISOString().slice(0, 10)}.csv`;
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(csv);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Business rules for an admin correcting a shift's times.
+ * Basic sanity (valid dates, end after start, overlaps) is checked by the caller.
+ *
+ * @param {Date} startTime - proposed shift start
+ * @param {Date|null} endTime - proposed shift end (null = shift stays open)
+ * @param {Date} now - current server time
+ * @returns {string|null} an error message to reject the edit, or null to allow it
+ */
+const MAX_SHIFT_HOURS = Number(process.env.MAX_SHIFT_HOURS) || 24;
+const MAX_EDIT_AGE_DAYS = Number(process.env.MAX_EDIT_AGE_DAYS) || 90;
+const CLOCK_SKEW_MS = 5 * 60 * 1000;
+
+const validateShiftEditPolicy = (startTime, endTime, now) => {
+  if (startTime > now.getTime() + CLOCK_SKEW_MS || (endTime && endTime > now.getTime() + CLOCK_SKEW_MS)) {
+    return 'Shift times cannot be in the future';
+  }
+  if (endTime && endTime - startTime > MAX_SHIFT_HOURS * 60 * 60 * 1000) {
+    return `A shift cannot be longer than ${MAX_SHIFT_HOURS} hours`;
+  }
+  if (now - startTime > MAX_EDIT_AGE_DAYS * 24 * 60 * 60 * 1000) {
+    return `Shifts older than ${MAX_EDIT_AGE_DAYS} days cannot be edited`;
+  }
+  return null;
+};
+
+// Admin correction of a shift (e.g. closing a forgotten clock-out)
+const updateShift = async (req, res, next) => {
+  try {
+    const { shiftId } = req.params;
+    const { startTime, endTime, note } = req.body;
+
+    if (!mongoose.isValidObjectId(shiftId)) {
+      return res.status(400).json({ message: 'Invalid shift id' });
+    }
+    if (!note || !String(note).trim()) {
+      return res.status(400).json({ message: 'A note explaining the correction is required' });
+    }
+
+    const shift = await Shift.findById(shiftId);
+    if (!shift) {
+      return res.status(404).json({ message: 'Shift not found' });
+    }
+
+    const newStart = startTime ? new Date(startTime) : shift.startTime;
+    // endTime omitted keeps the existing value; shifts cannot be re-opened
+    const newEnd = endTime ? new Date(endTime) : shift.endTime || null;
+
+    if (isNaN(newStart) || (newEnd && isNaN(newEnd))) {
+      return res.status(400).json({ message: 'Invalid date' });
+    }
+    if (newEnd && newEnd <= newStart) {
+      return res.status(400).json({ message: 'End time must be after start time' });
+    }
+
+    const policyError = validateShiftEditPolicy(newStart, newEnd, new Date());
+    if (policyError) {
+      return res.status(400).json({ message: policyError });
+    }
+
+    // Reject overlap with the same employee's other shifts (double-counted pay)
+    const overlapping = await Shift.findOne({
+      _id: { $ne: shift._id },
+      employeeId: shift.employeeId,
+      startTime: { $lt: newEnd || new Date(8.64e15) },
+      $or: [{ endTime: null }, { endTime: { $gt: newStart } }]
+    });
+    if (overlapping) {
+      return res.status(400).json({ message: 'This change would overlap another shift for this employee' });
+    }
+
+    shift.startTime = newStart;
+
+    if (newEnd) {
+      shift.endTime = newEnd;
+      // Close any break left open by the forgotten clock-out
+      shift.breaks.forEach(breakItem => {
+        if (!breakItem.endTime) breakItem.endTime = newEnd;
+      });
+      shift.onBreak = false;
+      shift.breakType = null;
+      shift.updateTotals();
+    }
+
+    shift.editedBy = req.user._id;
+    shift.editedAt = new Date();
+    shift.editNote = String(note).trim();
+
+    await shift.save();
+    await shift.populate('employeeId', 'name email');
+    await shift.populate('editedBy', 'name');
+
+    res.json(withTimes(shift, new Date()));
   } catch (error) {
     next(error);
   }
@@ -129,8 +404,11 @@ const getEmployeeShifts = async (req, res, next) => {
 
 module.exports = {
   getAllEmployees,
+  createEmployee,
   updateEmployeeRole,
   toggleEmployeeStatus,
+  resetEmployeePassword,
   getAllShifts,
-  getEmployeeShifts
+  exportShiftsCsv,
+  updateShift
 };

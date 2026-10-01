@@ -143,7 +143,7 @@ export const ShiftProvider = ({ children }) => {
     dispatch({ type: 'START_SHIFT_START' });
     try {
       // Get current location
-      const position = await getCurrentPosition();
+      const position = await tryGetPosition();
       
       const shiftData = {
         location: position
@@ -173,7 +173,7 @@ export const ShiftProvider = ({ children }) => {
     dispatch({ type: 'END_SHIFT_START' });
     try {
       // Get current location
-      const position = await getCurrentPosition();
+      const position = await tryGetPosition();
       
       const shiftData = {
         location: position
@@ -203,7 +203,7 @@ export const ShiftProvider = ({ children }) => {
     dispatch({ type: 'BREAK_START_START' });
     try {
       // Get current location
-      const position = await getCurrentPosition();
+      const position = await tryGetPosition();
       
       const breakData = {
         type: breakType,
@@ -230,7 +230,7 @@ export const ShiftProvider = ({ children }) => {
     dispatch({ type: 'BREAK_END_START' });
     try {
       // Get current location
-      const position = await getCurrentPosition();
+      const position = await tryGetPosition();
       
       const breakData = {
         location: position
@@ -271,10 +271,23 @@ export const ShiftProvider = ({ children }) => {
   };
 
   // Fetch shift statistics
+  // Period boundaries are computed here, in the employee's own timezone
   const fetchShiftStats = async () => {
     dispatch({ type: 'FETCH_STATS_START' });
     try {
-      const response = await axios.get('/api/shifts/stats');
+      const now = new Date();
+      const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const weekStart = new Date(dayStart);
+      weekStart.setDate(dayStart.getDate() - ((dayStart.getDay() + 6) % 7)); // Monday
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+      const response = await axios.get('/api/shifts/stats', {
+        params: {
+          dayStart: dayStart.toISOString(),
+          weekStart: weekStart.toISOString(),
+          monthStart: monthStart.toISOString()
+        }
+      });
       dispatch({ 
         type: 'FETCH_STATS_SUCCESS', 
         payload: response.data 
@@ -305,10 +318,21 @@ export const ShiftProvider = ({ children }) => {
           },
           (error) => {
             reject(new Error(`Unable to retrieve your location: ${error.message}`));
-          }
+          },
+          { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
         );
       }
     });
+  };
+
+  // Location for shift actions: null if unavailable or denied, so clocking
+  // in still works; the server rejects it only when REQUIRE_LOCATION is on
+  const tryGetPosition = async () => {
+    try {
+      return await getCurrentPosition();
+    } catch {
+      return null;
+    }
   };
 
   // Return values

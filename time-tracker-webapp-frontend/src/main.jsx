@@ -5,7 +5,8 @@ import './index.css'
 import axios from 'axios'
 
 // Set base URL for API requests
-axios.defaults.baseURL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+// In production the backend serves the frontend, so API calls are same-origin
+axios.defaults.baseURL = import.meta.env.VITE_API_URL ?? (import.meta.env.PROD ? '' : 'http://localhost:3001');
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

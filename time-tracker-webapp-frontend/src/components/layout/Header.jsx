@@ -114,9 +114,6 @@ const Header = () => {
               <Link to="/login" className="btn btn-primary">
                 Login
               </Link>
-              <Link to="/register" className="hidden md:inline-block btn btn-secondary">
-                Register
-              </Link>
             </div>
           )}
         </div>

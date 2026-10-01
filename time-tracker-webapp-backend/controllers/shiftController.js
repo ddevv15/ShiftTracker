@@ -1,17 +1,45 @@
 const Shift = require('../models/Shift');
-const User = require('../models/User');
-const { startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth } = require('date-fns');
+const { startOfDay, startOfWeek, startOfMonth } = require('date-fns');
 const { sendShiftStartEmail, sendShiftEndEmail } = require('../utils/emailService');
+const { computeShiftTimes } = require('../utils/shiftTime');
+const { isLocationRequired } = require('../utils/config');
+const { waitUntil } = require('@vercel/functions');
+
+const LOCATION_REQUIRED_MESSAGE =
+  'Location is required. Please allow location access in your browser and try again.';
+
+// Accept only a well-formed { latitude, longitude, accuracy }; anything else is null
+const parseLocation = (location) => {
+  if (!location || typeof location !== 'object') return null;
+  const latitude = Number(location.latitude);
+  const longitude = Number(location.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return null;
+  const accuracy = Number(location.accuracy);
+  return {
+    latitude,
+    longitude,
+    ...(Number.isFinite(accuracy) ? { accuracy } : {})
+  };
+};
+
+// Returns the parsed location, or sends a 400 and returns undefined
+const requireLocation = (req, res) => {
+  const location = parseLocation(req.body?.location);
+  if (!location && isLocationRequired()) {
+    res.status(400).json({ message: LOCATION_REQUIRED_MESSAGE });
+    return undefined;
+  }
+  return location;
+};
+
+const findOpenShift = (employeeId) =>
+  Shift.findOne({ employeeId, endTime: null }).sort({ startTime: -1 });
 
 // Get current active shift
 const getCurrentShift = async (req, res, next) => {
   try {
-    // Find active shift (one without endTime)
-    const shift = await Shift.findOne({
-      employeeId: req.user._id,
-      endTime: null
-    }).sort({ startTime: -1 });
-    
+    const shift = await findOpenShift(req.user._id);
     res.json(shift);
   } catch (error) {
     next(error);
@@ -21,35 +49,36 @@ const getCurrentShift = async (req, res, next) => {
 // Start a new shift
 const startShift = async (req, res, next) => {
   try {
+    const location = requireLocation(req, res);
+    if (location === undefined) return;
+
     // Check if there's already an active shift
-    const activeShift = await Shift.findOne({
-      employeeId: req.user._id,
-      endTime: null
-    });
-    
+    const activeShift = await findOpenShift(req.user._id);
     if (activeShift) {
       return res.status(400).json({ message: 'You already have an active shift' });
     }
-    
-    // Create new shift
-    const shift = await Shift.create({
-      employeeId: req.user._id,
-      startTime: new Date(),
-      location: req.body.location,
-      breaks: []
-    });
-    
-    // Get user's email for notification
-    const user = await User.findById(req.user._id);
-    
-    // Send shift start email notification
-    if (user && user.email) {
-      // Send email asynchronously - don't await to avoid blocking the response
-      sendShiftStartEmail(user, shift)
-        .then(() => console.log(`Shift start email sent to ${user.email}`))
-        .catch(err => console.error('Error sending shift start email:', err));
+
+    let shift;
+    try {
+      shift = await Shift.create({
+        employeeId: req.user._id,
+        startTime: new Date(),
+        ...(location ? { location } : {}),
+        breaks: []
+      });
+    } catch (error) {
+      // Two simultaneous clock-ins: the unique open-shift index rejects one
+      if (error.code === 11000) {
+        return res.status(400).json({ message: 'You already have an active shift' });
+      }
+      throw error;
     }
-    
+
+    // Send email without blocking the response; waitUntil keeps a serverless
+    // function alive until it finishes (no-op on a regular server)
+    waitUntil(sendShiftStartEmail(req.user, shift)
+      .catch(err => console.error('Error sending shift start email:', err)));
+
     res.status(201).json(shift);
   } catch (error) {
     next(error);
@@ -59,75 +88,39 @@ const startShift = async (req, res, next) => {
 // End current shift
 const endShift = async (req, res, next) => {
   try {
-    // Find active shift
-    const shift = await Shift.findOne({
-      employeeId: req.user._id,
-      endTime: null
-    });
-    
+    const location = requireLocation(req, res);
+    if (location === undefined) return;
+
+    const shift = await findOpenShift(req.user._id);
     if (!shift) {
       return res.status(404).json({ message: 'No active shift found' });
     }
-    
+
+    const now = new Date();
+
     // If on break, end the break first
     if (shift.onBreak) {
       const currentBreak = shift.breaks[shift.breaks.length - 1];
-      currentBreak.endTime = new Date();
+      currentBreak.endTime = now;
+      if (location) currentBreak.endLocation = location;
       shift.onBreak = false;
       shift.breakType = null;
     }
-    
-    // Get location from request body
-    const { location } = req.body;
-    
-    // Update shift with end time and location
-    shift.endTime = new Date();
-    shift.endLocation = location;
-    
-    // Calculate total working time
-    if (typeof shift.calculateWorkingTime === 'function') {
-      shift.totalWorkingTime = shift.calculateWorkingTime();
-    } else {
-      // Fallback calculation if method is not available
-      const totalTime = shift.endTime - new Date(shift.startTime);
-      let breakTime = 0;
-      
-      if (shift.breaks && shift.breaks.length > 0) {
-        breakTime = shift.breaks.reduce((total, breakItem) => {
-          if (!breakItem.endTime) return total;
-          return total + (new Date(breakItem.endTime) - new Date(breakItem.startTime));
-        }, 0);
-      }
-      
-      shift.totalWorkingTime = totalTime - breakTime;
-    }
-    
-    // Calculate total break time
-    if (shift.breaks && shift.breaks.length > 0) {
-      shift.totalBreakTime = shift.breaks.reduce((total, breakItem) => {
-        const breakEnd = breakItem.endTime ? new Date(breakItem.endTime) : new Date();
-        return total + (breakEnd - new Date(breakItem.startTime));
-      }, 0);
-    } else {
-      shift.totalBreakTime = 0;
-    }
-    
+
+    shift.endTime = now;
+    if (location) shift.endLocation = location;
+
+    // Store working and break totals
+    shift.updateTotals();
+
     await shift.save();
-    
-    // Get user's email for notification
-    const user = await User.findById(req.user._id);
-    
-    // Send shift end email notification
-    if (user && user.email) {
-      // Send email asynchronously - don't await to avoid blocking the response
-      sendShiftEndEmail(user, shift)
-        .then(() => console.log(`Shift end email sent to ${user.email}`))
-        .catch(err => console.error('Error sending shift end email:', err));
-    }
-    
+
+    // Send email without blocking the response (see startShift)
+    waitUntil(sendShiftEndEmail(req.user, shift)
+      .catch(err => console.error('Error sending shift end email:', err)));
+
     res.json(shift);
   } catch (error) {
-    console.error('Error ending shift:', error);
     next(error);
   }
 };
@@ -135,42 +128,35 @@ const endShift = async (req, res, next) => {
 // Start a break
 const startBreak = async (req, res, next) => {
   try {
-    const { type, location } = req.body;
-    
+    const { type } = req.body;
+
     // Validate break type
     if (!['LUNCH', 'SHORT'].includes(type)) {
       return res.status(400).json({ message: 'Invalid break type' });
     }
-    
-    // Find active shift
-    const shift = await Shift.findOne({
-      employeeId: req.user._id,
-      endTime: null
-    });
-    
+
+    const location = requireLocation(req, res);
+    if (location === undefined) return;
+
+    const shift = await findOpenShift(req.user._id);
     if (!shift) {
       return res.status(404).json({ message: 'No active shift found' });
     }
-    
-    // Check if already on break
+
     if (shift.onBreak) {
       return res.status(400).json({ message: 'You are already on break' });
     }
-    
-    // Create a new break
-    const newBreak = {
+
+    shift.breaks.push({
       type,
       startTime: new Date(),
-      location
-    };
-    
-    // Add break to shift
-    shift.breaks.push(newBreak);
+      ...(location ? { location } : {})
+    });
     shift.onBreak = true;
     shift.breakType = type;
-    
+
     await shift.save();
-    
+
     res.json(shift);
   } catch (error) {
     next(error);
@@ -180,31 +166,29 @@ const startBreak = async (req, res, next) => {
 // End a break
 const endBreak = async (req, res, next) => {
   try {
-    const { location } = req.body;
-    
-    // Find active shift
+    const location = requireLocation(req, res);
+    if (location === undefined) return;
+
     const shift = await Shift.findOne({
       employeeId: req.user._id,
       endTime: null,
       onBreak: true
     });
-    
+
     if (!shift) {
       return res.status(404).json({ message: 'No active break found' });
     }
-    
-    // Get the current break (the last one in the array)
+
+    // The current break is the last one in the array
     const currentBreak = shift.breaks[shift.breaks.length - 1];
-    
-    // Update break end time and location
     currentBreak.endTime = new Date();
-    
-    // Update shift status
+    if (location) currentBreak.endLocation = location;
+
     shift.onBreak = false;
     shift.breakType = null;
-    
+
     await shift.save();
-    
+
     res.json(shift);
   } catch (error) {
     next(error);
@@ -214,19 +198,18 @@ const endBreak = async (req, res, next) => {
 // Get shift history
 const getShiftHistory = async (req, res, next) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
     const skip = (page - 1) * limit;
-    
-    // Count total shifts
-    const total = await Shift.countDocuments({ employeeId: req.user._id });
-    
-    // Get shifts with pagination
-    const shifts = await Shift.find({ employeeId: req.user._id })
-      .sort({ startTime: -1 })
-      .skip(skip)
-      .limit(limit);
-    
+
+    const [total, shifts] = await Promise.all([
+      Shift.countDocuments({ employeeId: req.user._id }),
+      Shift.find({ employeeId: req.user._id })
+        .sort({ startTime: -1 })
+        .skip(skip)
+        .limit(limit)
+    ]);
+
     res.json({
       shifts,
       page,
@@ -238,73 +221,45 @@ const getShiftHistory = async (req, res, next) => {
   }
 };
 
+// Parse an ISO boundary sent by the client, falling back to a server value
+const parseBoundary = (value, fallback) => {
+  if (!value) return fallback;
+  const date = new Date(value);
+  return isNaN(date) ? fallback : date;
+};
+
 // Get shift statistics
+// The client sends dayStart/weekStart/monthStart computed in its own
+// timezone, so "today" means the employee's today, not the server's.
 const getShiftStatistics = async (req, res, next) => {
   try {
-    const userId = req.user._id;
-    const today = new Date();
-    
-    // Set time ranges
-    const dayStart = startOfDay(today);
-    const dayEnd = endOfDay(today);
-    const weekStart = startOfWeek(today, { weekStartsOn: 1 }); // Monday as start of week
-    const weekEnd = endOfWeek(today, { weekStartsOn: 1 });
-    const monthStart = startOfMonth(today);
-    const monthEnd = endOfMonth(today);
-    
-    // Get all shifts within the time ranges
-    const dailyShifts = await Shift.find({
-      employeeId: userId,
-      startTime: { $gte: dayStart, $lte: dayEnd }
-    });
-    
-    const weeklyShifts = await Shift.find({
-      employeeId: userId,
-      startTime: { $gte: weekStart, $lte: weekEnd }
-    });
-    
-    const monthlyShifts = await Shift.find({
-      employeeId: userId,
-      startTime: { $gte: monthStart, $lte: monthEnd }
-    });
-    
-    // Calculate total hours
-    const calculateTotalHours = (shifts) => {
-      let totalMs = 0;
-      
-      shifts.forEach(shift => {
-        const startTime = new Date(shift.startTime);
-        const endTime = shift.endTime ? new Date(shift.endTime) : new Date();
-        
-        // Calculate total shift duration
-        let shiftDuration = endTime - startTime;
-        
-        // Subtract break time
-        if (shift.breaks && shift.breaks.length > 0) {
-          const breakMs = shift.breaks.reduce((total, breakItem) => {
-            const breakStart = new Date(breakItem.startTime);
-            const breakEnd = breakItem.endTime ? new Date(breakItem.endTime) : new Date();
-            return total + (breakEnd - breakStart);
-          }, 0);
-          
-          shiftDuration -= breakMs;
-        }
-        
-        totalMs += shiftDuration;
-      });
-      
-      // Convert milliseconds to hours
+    const now = new Date();
+    const dayStart = parseBoundary(req.query.dayStart, startOfDay(now));
+    const weekStart = parseBoundary(req.query.weekStart, startOfWeek(now, { weekStartsOn: 1 }));
+    const monthStart = parseBoundary(req.query.monthStart, startOfMonth(now));
+    const earliest = new Date(Math.min(dayStart, weekStart, monthStart));
+
+    // Every shift overlapping the widest window (including ones started
+    // before it, e.g. a night shift that began yesterday)
+    const shifts = await Shift.find({
+      employeeId: req.user._id,
+      startTime: { $lt: now },
+      $or: [{ endTime: null }, { endTime: { $gt: earliest } }]
+    }).lean();
+
+    const hoursSince = (from) => {
+      const window = { from, to: now };
+      const totalMs = shifts.reduce(
+        (total, shift) => total + computeShiftTimes(shift, now, window).totalWorkingTime,
+        0
+      );
       return totalMs / (1000 * 60 * 60);
     };
-    
-    const dailyHours = calculateTotalHours(dailyShifts);
-    const weeklyHours = calculateTotalHours(weeklyShifts);
-    const monthlyHours = calculateTotalHours(monthlyShifts);
-    
+
     res.json({
-      today: dailyHours,
-      weekly: weeklyHours,
-      monthly: monthlyHours
+      today: hoursSince(dayStart),
+      weekly: hoursSince(weekStart),
+      monthly: hoursSince(monthStart)
     });
   } catch (error) {
     next(error);

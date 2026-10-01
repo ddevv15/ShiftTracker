@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { getJwtSecret } = require('../utils/config');
 
 // Authenticate JWT Token
 const authenticateJWT = async (req, res, next) => {
@@ -16,7 +17,7 @@ const authenticateJWT = async (req, res, next) => {
       return res.status(401).json({ message: 'No authorization token provided' });
     }
     
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+    const decoded = jwt.verify(token, getJwtSecret());
     
     // Check if user exists
     const user = await User.findById(decoded.id).select('-password');
