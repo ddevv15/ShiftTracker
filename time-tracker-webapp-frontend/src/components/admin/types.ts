@@ -14,6 +14,8 @@ export interface AdminShift {
   location?: { latitude: number; longitude: number } | null;
   breaks?: Array<{ startTime: string; endTime?: string; type: string }>;
   onBreak: boolean;
+  employeeName: string;
+  employeeDeleted: boolean;
   open: boolean;
   workingTime: number;
   breakTime: number;

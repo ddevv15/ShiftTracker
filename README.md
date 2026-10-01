@@ -144,6 +144,7 @@ The frontend runs on `http://localhost:5173` by default.
 | PUT | `/api/admin/employees/status` | Activate/deactivate employee |
 | PUT | `/api/admin/employees/password` | Reset an employee's password |
 | PUT | `/api/admin/employees/email` | Change an employee's login email (not allowed for, or to, `ADMIN_EMAILS` addresses) |
+| DELETE | `/api/admin/employees/:userId` | Delete an employee account. Their shifts are kept and labeled "(deleted)". Refused while they're clocked in |
 | GET | `/api/admin/shifts` | List shifts; filter with `employeeId`, `from`, `to` (ISO); paginated with `page`, `limit` |
 | GET | `/api/admin/shifts/export` | CSV of all matching shifts (same filters, plus `tz` for local times) |
 | PUT | `/api/admin/shifts/:shiftId` | Correct or close a shift (`startTime`, `endTime`, required `note`) |

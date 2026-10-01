@@ -186,6 +186,58 @@ const updateEmployeeEmail = async (req, res, next) => {
   }
 };
 
+// Delete an employee account; their shifts are kept for payroll records
+const deleteEmployee = async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+
+    if (!mongoose.isValidObjectId(userId)) {
+      return res.status(400).json({ message: 'Invalid user id' });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    if (user._id.equals(req.user._id)) {
+      return res.status(400).json({ message: 'You cannot delete your own account' });
+    }
+    if (isBootstrapAdmin(user.email)) {
+      return res.status(400).json({ message: 'This admin is listed in ADMIN_EMAILS and cannot be deleted' });
+    }
+
+    const openShift = await Shift.findOne({ employeeId: user._id, endTime: null });
+    if (openShift) {
+      return res.status(400).json({
+        message: `${user.name} is still clocked in. Close their open shift in the Shifts tab first.`
+      });
+    }
+
+    // Label their history before removing the account
+    const { modifiedCount } = await Shift.updateMany(
+      { employeeId: user._id },
+      { $set: { employeeSnapshot: { name: user.name, email: user.email, deletedAt: new Date() } } }
+    );
+    await User.deleteOne({ _id: user._id });
+
+    res.json({
+      message: `${user.name} was deleted`,
+      preservedShifts: modifiedCount
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Display name for a shift whose employee may have been deleted
+const employeeLabel = (shift) => {
+  if (shift.employeeId?.name) return { name: shift.employeeId.name, email: shift.employeeId.email };
+  if (shift.employeeSnapshot?.name) {
+    return { name: `${shift.employeeSnapshot.name} (deleted)`, email: shift.employeeSnapshot.email };
+  }
+  return { name: 'Deleted user', email: '' };
+};
+
 // Build a Mongo filter from ?employeeId=&from=&to=
 // from/to are ISO timestamps computed in the admin's own timezone
 const buildShiftFilter = (query) => {
@@ -221,6 +273,8 @@ const withTimes = (shift, now) => {
   const { totalWorkingTime, totalBreakTime } = computeShiftTimes(plain, now);
   return {
     ...plain,
+    employeeName: employeeLabel(plain).name,
+    employeeDeleted: !plain.employeeId,
     open: !plain.endTime,
     workingTime: totalWorkingTime,
     breakTime: totalBreakTime
@@ -317,9 +371,10 @@ const exportShiftsCsv = async (req, res, next) => {
     const rows = shifts.map(shift => {
       const { totalWorkingTime, totalBreakTime } = computeShiftTimes(shift, now);
       const start = new Date(shift.startTime);
+      const employee = employeeLabel(shift);
       return [
-        shift.employeeId?.name || 'Deleted user',
-        shift.employeeId?.email || '',
+        employee.name,
+        employee.email,
         dateFmt.format(start),
         timeFmt.format(start),
         shift.endTime ? timeFmt.format(new Date(shift.endTime)) : '',
@@ -451,6 +506,7 @@ module.exports = {
   toggleEmployeeStatus,
   resetEmployeePassword,
   updateEmployeeEmail,
+  deleteEmployee,
   getAllShifts,
   exportShiftsCsv,
   updateShift

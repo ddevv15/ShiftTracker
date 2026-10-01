@@ -69,6 +69,18 @@ const EmployeesPanel = ({ employees, currentUserId, onChanged }: Props) => {
     }), `${employee.name} now signs in with ${email.toLowerCase()}. Let them know.`);
   };
 
+  const deleteEmployee = (employee: Employee) => {
+    const confirmed = window.confirm(
+      `Delete ${employee.name} (${employee.email})?\n\n` +
+      'They will no longer be able to sign in. Their past shifts stay in reports and CSV exports, ' +
+      'marked as deleted. This cannot be undone.\n\n' +
+      'To block access temporarily instead, use Deactivate.'
+    );
+    if (!confirmed) return;
+    run(employee._id, () => axios.delete(`/api/admin/employees/${employee._id}`),
+      `${employee.name} was deleted. Their shift history was kept.`);
+  };
+
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
       <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
@@ -161,6 +173,10 @@ const EmployeesPanel = ({ employees, currentUserId, onChanged }: Props) => {
                       <button onClick={() => resetPassword(employee)} disabled={busy}
                         className="text-primary-600 hover:text-primary-800 dark:text-primary-400 disabled:opacity-40 disabled:cursor-not-allowed">
                         Reset password
+                      </button>
+                      <button onClick={() => deleteEmployee(employee)} disabled={isSelf || busy}
+                        className="text-red-600 hover:text-red-800 dark:text-red-400 disabled:opacity-40 disabled:cursor-not-allowed">
+                        Delete
                       </button>
                     </td>
                   </tr>

@@ -42,7 +42,7 @@ const EditShiftModal = ({ shift, onClose, onSaved }: Props) => {
             {shift.open ? 'Close shift' : 'Correct shift'}
           </h3>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            {shift.employeeId?.name || 'Unknown'} · times are in your local timezone
+            {shift.employeeName} · times are in your local timezone
           </p>
         </div>
 

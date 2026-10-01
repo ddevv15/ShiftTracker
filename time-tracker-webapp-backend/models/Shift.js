@@ -81,6 +81,13 @@ const shiftSchema = new mongoose.Schema({
   totalBreakTime: {
     type: Number
   },
+  // Name/email copied here when the employee account is deleted, so the
+  // shift history stays attributable in reports and CSV exports
+  employeeSnapshot: {
+    name: { type: String },
+    email: { type: String },
+    deletedAt: { type: Date }
+  },
   // Audit trail for admin corrections (e.g. forgotten clock-outs)
   editedBy: {
     type: mongoose.Schema.Types.ObjectId,
