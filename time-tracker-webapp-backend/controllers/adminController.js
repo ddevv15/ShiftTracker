@@ -3,6 +3,7 @@ const User = require('../models/User');
 const Shift = require('../models/Shift');
 const { computeShiftTimes, formatDuration } = require('../utils/shiftTime');
 const { isBootstrapAdmin } = require('../utils/adminEmails');
+const { reportForClient } = require('../utils/reportRules');
 
 const MAX_PAGE_SIZE = 200;
 
@@ -264,21 +265,60 @@ const buildShiftFilter = (query) => {
     }
   }
 
+  if (query.siteId) {
+    if (!mongoose.isValidObjectId(query.siteId)) {
+      return { error: 'Invalid site id' };
+    }
+    filter['report.site.id'] = new mongoose.Types.ObjectId(query.siteId);
+  }
+
+  if (query.hasIssues === 'true') {
+    filter['report.issues.0'] = { $exists: true };
+  }
+
   return { filter };
 };
 
-// Shift plus server-computed durations, so every view agrees
+// Shift plus server-computed durations and report summary, so every view agrees
 const withTimes = (shift, now) => {
   const plain = shift.toObject();
   const { totalWorkingTime, totalBreakTime } = computeShiftTimes(plain, now);
+  const { report, ...rest } = plain;
   return {
-    ...plain,
+    ...rest,
     employeeName: employeeLabel(plain).name,
     employeeDeleted: !plain.employeeId,
     open: !plain.endTime,
     workingTime: totalWorkingTime,
-    breakTime: totalBreakTime
+    breakTime: totalBreakTime,
+    site: report?.site?.name || null,
+    photoCount: report?.photos?.length || 0,
+    taskCount: report?.tasks?.length || 0,
+    issues: (report?.issues || []).map(issue => issue.label),
+    hasNote: Boolean(report?.note)
   };
+};
+
+// Full report for one shift, with short-lived photo URLs
+const getShiftReport = async (req, res, next) => {
+  try {
+    const { shiftId } = req.params;
+    if (!mongoose.isValidObjectId(shiftId)) {
+      return res.status(400).json({ message: 'Invalid shift id' });
+    }
+    const shift = await Shift.findById(shiftId)
+      .populate('employeeId', 'name email')
+      .populate('editedBy', 'name');
+    if (!shift) {
+      return res.status(404).json({ message: 'Shift not found' });
+    }
+    res.json({
+      shift: withTimes(shift, new Date()),
+      report: await reportForClient(shift)
+    });
+  } catch (error) {
+    next(error);
+  }
 };
 
 // Get shifts (filterable by employee and date range, paginated)
@@ -365,8 +405,10 @@ const exportShiftsCsv = async (req, res, next) => {
     const header = [
       'Employee', 'Email', 'Date', 'Start', 'End', 'Status',
       'Break (h:m)', 'Worked (h:m)', 'Worked (decimal hours)', 'Breaks',
+      'Site', 'Tasks', 'Issues', 'Note', 'Photos',
       'Start Latitude', 'Start Longitude', 'Edited By', 'Edit Note'
     ];
+    const labels = (items) => (items || []).map(item => item.label).join('; ');
 
     const rows = shifts.map(shift => {
       const { totalWorkingTime, totalBreakTime } = computeShiftTimes(shift, now);
@@ -383,6 +425,11 @@ const exportShiftsCsv = async (req, res, next) => {
         formatDuration(totalWorkingTime),
         (totalWorkingTime / (1000 * 60 * 60)).toFixed(2),
         (shift.breaks || []).length,
+        shift.report?.site?.name || '',
+        labels(shift.report?.tasks),
+        labels(shift.report?.issues),
+        shift.report?.note || '',
+        shift.report?.photos?.length || 0,
         shift.location?.latitude?.toFixed(6) ?? '',
         shift.location?.longitude?.toFixed(6) ?? '',
         shift.editedBy?.name || '',
@@ -508,6 +555,7 @@ module.exports = {
   updateEmployeeEmail,
   deleteEmployee,
   getAllShifts,
+  getShiftReport,
   exportShiftsCsv,
   updateShift
 };

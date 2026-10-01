@@ -39,6 +39,37 @@ const breakSchema = new mongoose.Schema({
   }
 }, { _id: false });
 
+// Shift report: what was done, where, with photo proof.
+// Labels are copied in so renaming a site/option never rewrites history.
+const labelRefSchema = new mongoose.Schema({
+  id: { type: mongoose.Schema.Types.ObjectId, required: true },
+  label: { type: String, required: true }
+}, { _id: false });
+
+const photoSchema = new mongoose.Schema({
+  key: { type: String, required: true },
+  tag: { type: String, enum: ['BEFORE', 'DURING', 'AFTER'], required: true },
+  takenAt: { type: Date, required: true },
+  location: { type: locationSchema },
+  size: { type: Number }
+});
+
+const reportSchema = new mongoose.Schema({
+  site: {
+    id: { type: mongoose.Schema.Types.ObjectId },
+    name: { type: String }
+  },
+  tasks: [labelRefSchema],
+  issues: [labelRefSchema],
+  note: {
+    type: String,
+    trim: true,
+    maxlength: [500, 'Note must be 500 characters or less']
+  },
+  photos: [photoSchema],
+  submittedAt: { type: Date }
+}, { _id: false });
+
 // Shift schema
 const shiftSchema = new mongoose.Schema({
   employeeId: {
@@ -80,6 +111,11 @@ const shiftSchema = new mongoose.Schema({
   },
   totalBreakTime: {
     type: Number
+  },
+  // Updated field-by-field ($set/$push) so concurrent autosaves and photo
+  // uploads never overwrite each other
+  report: {
+    type: reportSchema
   },
   // Name/email copied here when the employee account is deleted, so the
   // shift history stays attributable in reports and CSV exports

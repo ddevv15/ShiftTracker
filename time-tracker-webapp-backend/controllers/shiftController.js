@@ -4,24 +4,11 @@ const { sendShiftStartEmail, sendShiftEndEmail } = require('../utils/emailServic
 const { computeShiftTimes } = require('../utils/shiftTime');
 const { isLocationRequired } = require('../utils/config');
 const { waitUntil } = require('@vercel/functions');
+const { parseLocation } = require('../utils/location');
+const { isReportRequired, missingReportFields } = require('../utils/reportRules');
 
 const LOCATION_REQUIRED_MESSAGE =
   'Location is required. Please allow location access in your browser and try again.';
-
-// Accept only a well-formed { latitude, longitude, accuracy }; anything else is null
-const parseLocation = (location) => {
-  if (!location || typeof location !== 'object') return null;
-  const latitude = Number(location.latitude);
-  const longitude = Number(location.longitude);
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
-  if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return null;
-  const accuracy = Number(location.accuracy);
-  return {
-    latitude,
-    longitude,
-    ...(Number.isFinite(accuracy) ? { accuracy } : {})
-  };
-};
 
 // Returns the parsed location, or sends a 400 and returns undefined
 const requireLocation = (req, res) => {
@@ -96,7 +83,20 @@ const endShift = async (req, res, next) => {
       return res.status(404).json({ message: 'No active shift found' });
     }
 
+    // Shift report must name the site and at least one task (once set up)
+    if (await isReportRequired()) {
+      const missing = missingReportFields(shift);
+      if (missing.length > 0) {
+        return res.status(400).json({
+          code: 'REPORT_INCOMPLETE',
+          missing,
+          message: 'Pick your site and at least one task before ending your shift'
+        });
+      }
+    }
+
     const now = new Date();
+    shift.set('report.submittedAt', now);
 
     // If on break, end the break first
     if (shift.onBreak) {

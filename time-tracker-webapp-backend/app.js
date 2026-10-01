@@ -17,6 +17,7 @@ validateConfig();
 const authRoutes = require('./routes/authRoutes');
 const shiftRoutes = require('./routes/shiftRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const { getReportOptions } = require('./controllers/reportController');
 
 // Import middleware
 const { handleError } = require('./middleware/errorHandler');
@@ -70,6 +71,7 @@ app.use('/api', (req, res, next) => {
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/shifts', authenticateJWT, shiftRoutes);
+app.get('/api/report-options', authenticateJWT, getReportOptions);
 app.use('/api/admin', authenticateJWT, adminRoutes);
 
 // Unknown API routes return JSON 404 instead of the SPA

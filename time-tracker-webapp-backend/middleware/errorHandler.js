@@ -14,6 +14,16 @@ const handleError = (err, req, res, next) => {
       return res.status(400).json({ message: 'Duplicate field value entered' });
     }
     
+    // Request body over the size limit (e.g. an uncompressed photo)
+    if (err.type === 'entity.too.large') {
+      return res.status(413).json({ message: 'That file is too large' });
+    }
+    
+    // Malformed JSON body
+    if (err.type === 'entity.parse.failed') {
+      return res.status(400).json({ message: 'Invalid request body' });
+    }
+    
     // JWT errors are handled in the auth middleware
     
     // Default server error

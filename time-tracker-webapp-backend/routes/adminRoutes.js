@@ -9,9 +9,18 @@ const {
   updateEmployeeEmail,
   deleteEmployee,
   getAllShifts,
+  getShiftReport,
   exportShiftsCsv,
   updateShift
 } = require('../controllers/adminController');
+const {
+  listSites,
+  createSite,
+  updateSite,
+  listOptions,
+  createOption,
+  updateOption
+} = require('../controllers/setupController');
 const { isAdmin } = require('../middleware/auth');
 
 // All routes need admin privileges
@@ -29,6 +38,15 @@ router.delete('/employees/:userId', deleteEmployee);
 // Shift routes (filter with ?employeeId=&from=&to=)
 router.get('/shifts', getAllShifts);
 router.get('/shifts/export', exportShiftsCsv);
+router.get('/shifts/:shiftId/report', getShiftReport);
 router.put('/shifts/:shiftId', updateShift);
+
+// Setup: job sites, tasks and issue flags for shift reports
+router.get('/sites', listSites);
+router.post('/sites', createSite);
+router.put('/sites/:id', updateSite);
+router.get('/report-options', listOptions);
+router.post('/report-options', createOption);
+router.put('/report-options/:id', updateOption);
 
 module.exports = router;
