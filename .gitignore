@@ -30,3 +30,5 @@ Screenshot*.png
 
 # Vercel
 .vercel
+.env*
+!.env.example
