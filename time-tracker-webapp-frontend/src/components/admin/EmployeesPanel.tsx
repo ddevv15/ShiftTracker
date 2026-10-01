@@ -60,6 +60,15 @@ const EmployeesPanel = ({ employees, currentUserId, onChanged }: Props) => {
     }), `Password reset for ${employee.name}.`);
   };
 
+  const editEmail = (employee: Employee) => {
+    const email = window.prompt(`New login email for ${employee.name}:`, employee.email)?.trim();
+    if (!email || email.toLowerCase() === employee.email) return;
+    run(employee._id, () => axios.put('/api/admin/employees/email', {
+      userId: employee._id,
+      email
+    }), `${employee.name} now signs in with ${email.toLowerCase()}. Let them know.`);
+  };
+
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
       <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
@@ -144,6 +153,10 @@ const EmployeesPanel = ({ employees, currentUserId, onChanged }: Props) => {
                       <button onClick={() => toggleActive(employee)} disabled={isSelf || busy}
                         className="text-primary-600 hover:text-primary-800 dark:text-primary-400 disabled:opacity-40 disabled:cursor-not-allowed">
                         {employee.active ? 'Deactivate' : 'Activate'}
+                      </button>
+                      <button onClick={() => editEmail(employee)} disabled={busy}
+                        className="text-primary-600 hover:text-primary-800 dark:text-primary-400 disabled:opacity-40 disabled:cursor-not-allowed">
+                        Edit email
                       </button>
                       <button onClick={() => resetPassword(employee)} disabled={busy}
                         className="text-primary-600 hover:text-primary-800 dark:text-primary-400 disabled:opacity-40 disabled:cursor-not-allowed">

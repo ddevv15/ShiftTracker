@@ -6,6 +6,7 @@ const {
   updateEmployeeRole,
   toggleEmployeeStatus,
   resetEmployeePassword,
+  updateEmployeeEmail,
   getAllShifts,
   exportShiftsCsv,
   updateShift
@@ -21,6 +22,7 @@ router.post('/employees', createEmployee);
 router.put('/employees/role', updateEmployeeRole);
 router.put('/employees/status', toggleEmployeeStatus);
 router.put('/employees/password', resetEmployeePassword);
+router.put('/employees/email', updateEmployeeEmail);
 
 // Shift routes (filter with ?employeeId=&from=&to=)
 router.get('/shifts', getAllShifts);

@@ -144,6 +144,48 @@ const resetEmployeePassword = async (req, res, next) => {
   }
 };
 
+// Change an employee's login email
+const updateEmployeeEmail = async (req, res, next) => {
+  try {
+    const { userId } = req.body;
+    const email = String(req.body.email || '').trim().toLowerCase();
+
+    if (!mongoose.isValidObjectId(userId)) {
+      return res.status(400).json({ message: 'Invalid user id' });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    if (user.email === email) {
+      return res.json(toPublicUser(user));
+    }
+
+    // ADMIN_EMAILS grants admin rights by email, so moving an email into or
+    // out of that list would silently change who is an admin
+    if (isBootstrapAdmin(user.email)) {
+      return res.status(400).json({ message: 'This admin is listed in ADMIN_EMAILS; change their email in the server configuration instead' });
+    }
+    if (isBootstrapAdmin(email)) {
+      return res.status(400).json({ message: 'That email is reserved in ADMIN_EMAILS' });
+    }
+
+    const existing = await User.findOne({ email, _id: { $ne: user._id } });
+    if (existing) {
+      return res.status(400).json({ message: 'A user with this email already exists' });
+    }
+
+    // Format is validated by the User schema
+    user.email = email;
+    await user.save();
+
+    res.json(toPublicUser(user));
+  } catch (error) {
+    next(error);
+  }
+};
+
 // Build a Mongo filter from ?employeeId=&from=&to=
 // from/to are ISO timestamps computed in the admin's own timezone
 const buildShiftFilter = (query) => {
@@ -408,6 +450,7 @@ module.exports = {
   updateEmployeeRole,
   toggleEmployeeStatus,
   resetEmployeePassword,
+  updateEmployeeEmail,
   getAllShifts,
   exportShiftsCsv,
   updateShift
