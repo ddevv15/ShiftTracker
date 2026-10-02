@@ -151,6 +151,10 @@ The frontend runs on `http://localhost:5173` by default.
 
 Admins can't demote or deactivate themselves, and accounts listed in `ADMIN_EMAILS` can't be demoted or deactivated by anyone.
 
+## Shift Reports
+
+During a shift, workers fill in a **Today's job** card: they pick the site (nearest suggested by GPS), take tagged photos (Before / During / After), tap the work done and any issues, and can add a short note. Everything autosaves. **End Shift** opens a wrap-up sheet that only asks for what's missing. Admins manage sites, tasks and issue flags under **Admin → Setup**, and review reports and photos from the Shifts tab. Photos are stored privately in Cloudflare R2 and shown through links that expire after an hour. See [the design spec](docs/superpowers/specs/2026-10-01-shift-reports-design.md).
+
 ## Team Setup
 
 1. Set `ADMIN_EMAILS=you@company.com` (comma-separated for several) in the backend `.env`.
@@ -176,6 +180,7 @@ See [`.env.example`](time-tracker-webapp-backend/.env.example) for the full list
 | `MAX_SHIFT_HOURS` / `MAX_EDIT_AGE_DAYS` | | Limits on admin corrections (default 24h / 90 days) |
 | `EMAIL_USER` / `EMAIL_APP_PASSWORD` | | Gmail notifications. Leave blank to disable |
 | `TZ` | | Time zone for times in notification emails |
+| `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET` | for photos | Private Cloudflare R2 bucket for shift report photos |
 
 ### Frontend (`time-tracker-webapp-frontend/.env`)
 

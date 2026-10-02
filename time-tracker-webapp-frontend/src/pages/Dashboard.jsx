@@ -6,6 +6,8 @@ import ShiftTimer from '../components/shift/ShiftTimer';
 import ShiftStatus from '../components/shift/ShiftStatus';
 import LocationMap from '../components/shift/LocationMap';
 import ShiftHistory from '../components/dashboard/ShiftHistory';
+import { ReportProvider } from '../components/report/ReportContext';
+import JobCard from '../components/report/JobCard';
 
 const DashboardPage = () => {
   const { fetchCurrentShift, fetchShiftHistory, fetchShiftStats } = useContext(ShiftContext);
@@ -24,10 +26,16 @@ const DashboardPage = () => {
       <main className="flex-grow container mx-auto px-4 py-8">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-8">Employee Dashboard</h1>
         
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
-          <ShiftActions />
-          <ShiftTimer />
-        </div>
+        <ReportProvider>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+            <ShiftActions />
+            <ShiftTimer />
+          </div>
+
+          <div className="mb-8">
+            <JobCard />
+          </div>
+        </ReportProvider>
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
           <ShiftStatus />

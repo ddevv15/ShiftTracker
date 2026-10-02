@@ -4,6 +4,7 @@ import Header from '../components/layout/Header';
 import { AuthContext } from '../context/AuthContext';
 import EmployeesPanel from '../components/admin/EmployeesPanel';
 import ShiftsPanel from '../components/admin/ShiftsPanel';
+import SetupPanel from '../components/admin/SetupPanel';
 import { Employee, errorMessage } from '../components/admin/types';
 
 const AdminPage = () => {
@@ -11,7 +12,7 @@ const AdminPage = () => {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<'employees' | 'shifts'>('shifts');
+  const [tab, setTab] = useState<'employees' | 'shifts' | 'setup'>('shifts');
 
   const fetchEmployees = useCallback(async () => {
     setError(null);
@@ -58,6 +59,9 @@ const AdminPage = () => {
             <li className="mr-2">
               <button onClick={() => setTab('employees')} className={tabClass('employees')}>Employees</button>
             </li>
+            <li className="mr-2">
+              <button onClick={() => setTab('setup')} className={tabClass('setup')}>Setup</button>
+            </li>
           </ul>
         </div>
 
@@ -67,6 +71,8 @@ const AdminPage = () => {
           </div>
         ) : tab === 'shifts' ? (
           <ShiftsPanel employees={employees} />
+        ) : tab === 'setup' ? (
+          <SetupPanel />
         ) : (
           <EmployeesPanel employees={employees} currentUserId={user?.id} onChanged={fetchEmployees} />
         )}

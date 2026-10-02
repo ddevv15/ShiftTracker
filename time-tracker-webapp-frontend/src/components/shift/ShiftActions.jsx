@@ -1,5 +1,7 @@
 import { useContext, useState } from 'react';
 import { ShiftContext } from '../../context/ShiftContext';
+import { useReport } from '../report/ReportContext';
+import WrapUpSheet from '../report/WrapUpSheet';
 
 const ShiftActions = () => {
   const { 
@@ -14,6 +16,8 @@ const ShiftActions = () => {
   
   const [error, setError] = useState(null);
   const [showBreakOptions, setShowBreakOptions] = useState(false);
+  const [showWrapUp, setShowWrapUp] = useState(false);
+  const report = useReport();
 
   // Prefer the server's explanation (e.g. location required, already clocked in)
   const messageFrom = (err, fallback) => err?.response?.data?.message || fallback;
@@ -28,10 +32,19 @@ const ShiftActions = () => {
   };
 
   const handleEndShift = async () => {
+    setError(null);
+    // With sites/tasks set up, ending goes through the wrap-up sheet
+    if (report?.configured) {
+      setShowWrapUp(true);
+      return;
+    }
     try {
-      setError(null);
       await endShift();
     } catch (err) {
+      if (err?.response?.data?.code === 'REPORT_INCOMPLETE') {
+        setShowWrapUp(true);
+        return;
+      }
       setError(messageFrom(err, 'Failed to end shift. Please try again.'));
     }
   };
@@ -172,6 +185,7 @@ const ShiftActions = () => {
           </button>
         )}
       </div>
+      <WrapUpSheet open={showWrapUp} onClose={() => setShowWrapUp(false)} onEndShift={endShift} />
     </div>
   );
 };

@@ -1,6 +1,9 @@
 import { useContext, useEffect, useState } from 'react';
 import { ShiftContext } from '../../context/ShiftContext';
 import { format, parseISO, differenceInMilliseconds } from 'date-fns';
+import Sheet from '../report/Sheet';
+import ReportView from '../report/ReportView';
+import { getShiftReport, messageFrom } from '../../lib/reportApi';
 
 const ShiftHistory = () => {
   const { shiftHistory, fetchShiftHistory, isLoading } = useContext(ShiftContext);
@@ -8,6 +11,20 @@ const ShiftHistory = () => {
   const [totalPages, setTotalPages] = useState(1);
   const [error, setError] = useState(null);
   const [shifts, setShifts] = useState([]);
+  const [reportShift, setReportShift] = useState(null);
+  const [report, setReport] = useState(null);
+  const [reportError, setReportError] = useState(null);
+
+  const openReport = async (shift) => {
+    setReportShift(shift);
+    setReport(null);
+    setReportError(null);
+    try {
+      setReport(await getShiftReport(shift._id));
+    } catch (err) {
+      setReportError(messageFrom(err, 'Could not load this report'));
+    }
+  };
 
   useEffect(() => {
     loadShiftHistory();
@@ -114,6 +131,9 @@ const ShiftHistory = () => {
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                       Breaks
                     </th>
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      Report
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200 dark:bg-gray-800 dark:divide-gray-700">
@@ -139,6 +159,19 @@ const ShiftHistory = () => {
                           ? shift.breaks.length
                           : 'None'
                         }
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm">
+                        {shift.endTime ? (
+                          <button
+                            type="button"
+                            onClick={() => openReport(shift)}
+                            className="tap font-medium text-primary-600 hover:text-primary-800 dark:text-primary-400"
+                          >
+                            View{shift.report?.photos?.length ? ` · ${shift.report.photos.length} 📷` : ''}
+                          </button>
+                        ) : (
+                          <span className="text-gray-400">—</span>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -173,6 +206,20 @@ const ShiftHistory = () => {
           )}
         </>
       )}
+
+      <Sheet
+        open={Boolean(reportShift)}
+        onClose={() => setReportShift(null)}
+        title={reportShift ? `Report · ${format(parseISO(reportShift.startTime), 'MMM dd, yyyy')}` : 'Report'}
+      >
+        {reportError && <p className="py-4 text-red-600 dark:text-red-400">{reportError}</p>}
+        {!report && !reportError && (
+          <div className="flex justify-center py-10">
+            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-primary-600"></div>
+          </div>
+        )}
+        <ReportView report={report} />
+      </Sheet>
     </div>
   );
 };

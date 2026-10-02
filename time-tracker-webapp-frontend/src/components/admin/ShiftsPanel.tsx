@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import EditShiftModal from './EditShiftModal';
+import ReportModal from './ReportModal';
 import {
   AdminShift, Employee, ShiftFilters,
   errorMessage, filtersToParams, formatDuration, inputClass, thClass, tdClass
@@ -13,13 +14,19 @@ interface Props {
 }
 
 const ShiftsPanel = ({ employees }: Props) => {
-  const [filters, setFilters] = useState<ShiftFilters>({ employeeId: '', from: '', to: '' });
+  const [filters, setFilters] = useState<ShiftFilters>({ employeeId: '', siteId: '', from: '', to: '', hasIssues: false });
   const [page, setPage] = useState(1);
   const [data, setData] = useState({ shifts: [] as AdminShift[], pages: 1, total: 0, totalWorkingTime: 0, openCount: 0 });
   const [isLoading, setIsLoading] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<AdminShift | null>(null);
+  const [viewing, setViewing] = useState<AdminShift | null>(null);
+  const [sites, setSites] = useState<Array<{ _id: string; name: string }>>([]);
+
+  useEffect(() => {
+    axios.get('/api/admin/sites').then(res => setSites(res.data)).catch(() => {});
+  }, []);
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -40,7 +47,7 @@ const ShiftsPanel = ({ employees }: Props) => {
     load();
   }, [load]);
 
-  const updateFilter = (key: keyof ShiftFilters, value: string) => {
+  const updateFilter = <K extends keyof ShiftFilters>(key: K, value: ShiftFilters[K]) => {
     setFilters(prev => ({ ...prev, [key]: value }));
     setPage(1);
   };
@@ -79,7 +86,7 @@ const ShiftsPanel = ({ employees }: Props) => {
       </div>
 
       {/* Filters */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mb-4 items-end">
         <label className="text-xs font-medium text-gray-500 dark:text-gray-400">
           Employee
           <select className={`${inputClass} mt-1`} value={filters.employeeId}
@@ -87,6 +94,16 @@ const ShiftsPanel = ({ employees }: Props) => {
             <option value="">All employees</option>
             {employees.map(emp => (
               <option key={emp._id} value={emp._id}>{emp.name}</option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs font-medium text-gray-500 dark:text-gray-400">
+          Site
+          <select className={`${inputClass} mt-1`} value={filters.siteId}
+            onChange={e => updateFilter('siteId', e.target.value)}>
+            <option value="">All sites</option>
+            {sites.map(site => (
+              <option key={site._id} value={site._id}>{site.name}</option>
             ))}
           </select>
         </label>
@@ -99,6 +116,11 @@ const ShiftsPanel = ({ employees }: Props) => {
           To
           <input type="date" className={`${inputClass} mt-1`} value={filters.to}
             onChange={e => updateFilter('to', e.target.value)} />
+        </label>
+        <label className="flex items-center gap-2 h-[38px] text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer">
+          <input type="checkbox" className="h-4 w-4 accent-red-600" checked={filters.hasIssues}
+            onChange={e => updateFilter('hasIssues', e.target.checked)} />
+          Only with issues
         </label>
       </div>
 
@@ -134,8 +156,8 @@ const ShiftsPanel = ({ employees }: Props) => {
                 <th scope="col" className={thClass}>Date</th>
                 <th scope="col" className={thClass}>Start</th>
                 <th scope="col" className={thClass}>End</th>
-                <th scope="col" className={thClass}>Breaks</th>
                 <th scope="col" className={thClass}>Worked</th>
+                <th scope="col" className={thClass}>Report</th>
                 <th scope="col" className={thClass}></th>
               </tr>
             </thead>
@@ -165,9 +187,6 @@ const ShiftsPanel = ({ employees }: Props) => {
                     )}
                   </td>
                   <td className={tdClass}>
-                    {shift.breaks?.length ? `${shift.breaks.length} · ${formatDuration(shift.breakTime)}` : 'None'}
-                  </td>
-                  <td className={tdClass}>
                     {formatDuration(shift.workingTime)}
                     {shift.editedAt && (
                       <span title={`Edited by ${shift.editedBy?.name || 'admin'}: ${shift.editNote || ''}`}
@@ -176,7 +195,34 @@ const ShiftsPanel = ({ employees }: Props) => {
                       </span>
                     )}
                   </td>
-                  <td className={`${tdClass} text-right`}>
+                  <td className={`${tdClass} whitespace-normal min-w-[12rem]`}>
+                    {shift.site || shift.taskCount || shift.photoCount || shift.issues.length || shift.hasNote ? (
+                      <button type="button" onClick={() => setViewing(shift)} className="text-left group">
+                        <span className="font-medium text-gray-800 dark:text-gray-200 group-hover:text-primary-600 dark:group-hover:text-primary-400">
+                          {shift.site || 'No site'}
+                        </span>
+                        <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">
+                          {shift.photoCount > 0 && `📷 ${shift.photoCount}`}
+                        </span>
+                        {shift.issues.length > 0 && (
+                          <span className="mt-1 flex flex-wrap gap-1">
+                            {shift.issues.map(issue => (
+                              <span key={issue} className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
+                                {issue}
+                              </span>
+                            ))}
+                          </span>
+                        )}
+                      </button>
+                    ) : (
+                      <span className="text-gray-400">—</span>
+                    )}
+                  </td>
+                  <td className={`${tdClass} text-right space-x-3`}>
+                    <button onClick={() => setViewing(shift)}
+                      className="text-primary-600 hover:text-primary-800 dark:text-primary-400">
+                      Report
+                    </button>
                     <button onClick={() => setEditing(shift)}
                       className="text-primary-600 hover:text-primary-800 dark:text-primary-400">
                       {shift.open ? 'Close' : 'Edit'}
@@ -197,6 +243,8 @@ const ShiftsPanel = ({ employees }: Props) => {
           <button className="btn btn-secondary" disabled={page >= data.pages} onClick={() => setPage(p => p + 1)}>Next</button>
         </div>
       )}
+
+      {viewing && <ReportModal shift={viewing} onClose={() => setViewing(null)} />}
 
       {editing && (
         <EditShiftModal

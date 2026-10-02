@@ -22,12 +22,20 @@ export interface AdminShift {
   editedBy?: { _id: string; name: string } | null;
   editedAt?: string;
   editNote?: string;
+  // Shift report summary
+  site: string | null;
+  photoCount: number;
+  taskCount: number;
+  issues: string[];
+  hasNote: boolean;
 }
 
 export interface ShiftFilters {
   employeeId: string;
+  siteId: string;
   from: string; // YYYY-MM-DD, local date
   to: string;   // YYYY-MM-DD, local date (inclusive)
+  hasIssues: boolean;
 }
 
 export const formatDuration = (ms: number) => {
@@ -48,6 +56,8 @@ export const toLocalInputValue = (value?: string | null) => {
 export const filtersToParams = (filters: ShiftFilters) => {
   const params: Record<string, string> = {};
   if (filters.employeeId) params.employeeId = filters.employeeId;
+  if (filters.siteId) params.siteId = filters.siteId;
+  if (filters.hasIssues) params.hasIssues = 'true';
   if (filters.from) params.from = new Date(`${filters.from}T00:00`).toISOString();
   if (filters.to) {
     const end = new Date(`${filters.to}T00:00`);
