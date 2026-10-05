@@ -17,6 +17,7 @@ export interface AdminShift {
   employeeName: string;
   employeeDeleted: boolean;
   open: boolean;
+  manual?: boolean;
   workingTime: number;
   breakTime: number;
   editedBy?: { _id: string; name: string } | null;

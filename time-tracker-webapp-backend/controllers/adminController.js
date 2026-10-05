@@ -474,8 +474,100 @@ const validateShiftEditPolicy = (startTime, endTime, now) => {
   return null;
 };
 
+// Another shift of this employee overlapping [start, end) would double-count pay
+const findOverlappingShift = (employeeId, start, end, excludeShiftId = null) => {
+  const query = {
+    employeeId,
+    startTime: { $lt: end || new Date(8.64e15) },
+    $or: [{ endTime: null }, { endTime: { $gt: start } }]
+  };
+  if (excludeShiftId) query._id = { $ne: excludeShiftId };
+  return Shift.findOne(query);
+};
+
+// Admin adds a closed shift for a day the employee forgot to clock in
+const createShift = async (req, res, next) => {
+  try {
+    const { employeeId, startTime, endTime, note } = req.body;
+    const breakMinutes = req.body.breakMinutes === undefined || req.body.breakMinutes === ''
+      ? 0
+      : Number(req.body.breakMinutes);
+
+    if (!mongoose.isValidObjectId(employeeId)) {
+      return res.status(400).json({ message: 'Invalid employee id' });
+    }
+    if (!note || !String(note).trim()) {
+      return res.status(400).json({ message: 'A note explaining the entry is required' });
+    }
+    if (!startTime || !endTime) {
+      return res.status(400).json({ message: 'Start and end time are required' });
+    }
+
+    const start = new Date(startTime);
+    const end = new Date(endTime);
+    if (isNaN(start) || isNaN(end)) {
+      return res.status(400).json({ message: 'Invalid date' });
+    }
+    if (end <= start) {
+      return res.status(400).json({ message: 'End time must be after start time' });
+    }
+    if (!Number.isInteger(breakMinutes) || breakMinutes < 0) {
+      return res.status(400).json({ message: 'Break must be a whole number of minutes, 0 or more' });
+    }
+    // A break as long as the shift would leave nothing worked
+    if (breakMinutes * 60 * 1000 >= end - start) {
+      return res.status(400).json({ message: 'Break must be shorter than the shift' });
+    }
+
+    const policyError = validateShiftEditPolicy(start, end, new Date());
+    if (policyError) {
+      return res.status(400).json({ message: policyError });
+    }
+
+    const employee = await User.findById(employeeId);
+    if (!employee) {
+      return res.status(404).json({ message: 'Employee not found' });
+    }
+    if (!employee.active) {
+      return res.status(400).json({ message: `${employee.name} is deactivated` });
+    }
+
+    if (await findOverlappingShift(employee._id, start, end)) {
+      return res.status(400).json({ message: 'This shift would overlap another shift for this employee' });
+    }
+
+    // Recorded as one short break centred in the shift, so the standard
+    // duration math and CSV export need no special case for manual shifts
+    const breaks = [];
+    if (breakMinutes > 0) {
+      const breakMs = breakMinutes * 60 * 1000;
+      const breakStart = new Date(start.getTime() + (end - start - breakMs) / 2);
+      breaks.push({ type: 'SHORT', startTime: breakStart, endTime: new Date(breakStart.getTime() + breakMs) });
+    }
+
+    const shift = new Shift({
+      employeeId: employee._id,
+      startTime: start,
+      endTime: end,
+      breaks,
+      manual: true,
+      editedBy: req.user._id,
+      editedAt: new Date(),
+      editNote: String(note).trim()
+    });
+    shift.updateTotals();
+    await shift.save();
+    await shift.populate('employeeId', 'name email');
+    await shift.populate('editedBy', 'name');
+
+    res.status(201).json(withTimes(shift, new Date()));
+  } catch (error) {
+    next(error);
+  }
+};
+
 // Admin correction of a shift (e.g. closing a forgotten clock-out)
-const updateShift = async (req, res, next) => {
+const updateShift =async (req, res, next) => {
   try {
     const { shiftId } = req.params;
     const { startTime, endTime, note } = req.body;
@@ -508,14 +600,7 @@ const updateShift = async (req, res, next) => {
       return res.status(400).json({ message: policyError });
     }
 
-    // Reject overlap with the same employee's other shifts (double-counted pay)
-    const overlapping = await Shift.findOne({
-      _id: { $ne: shift._id },
-      employeeId: shift.employeeId,
-      startTime: { $lt: newEnd || new Date(8.64e15) },
-      $or: [{ endTime: null }, { endTime: { $gt: newStart } }]
-    });
-    if (overlapping) {
+    if (await findOverlappingShift(shift.employeeId, newStart, newEnd, shift._id)) {
       return res.status(400).json({ message: 'This change would overlap another shift for this employee' });
     }
 
@@ -557,5 +642,6 @@ module.exports = {
   getAllShifts,
   getShiftReport,
   exportShiftsCsv,
+  createShift,
   updateShift
 };

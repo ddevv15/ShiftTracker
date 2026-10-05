@@ -11,8 +11,9 @@ const {
   getAllShifts,
   getShiftReport,
   exportShiftsCsv,
+  createShift,
   updateShift
-} = require('../controllers/adminController');
+} =require('../controllers/adminController');
 const {
   listSites,
   createSite,
@@ -37,6 +38,7 @@ router.delete('/employees/:userId', deleteEmployee);
 
 // Shift routes (filter with ?employeeId=&from=&to=)
 router.get('/shifts', getAllShifts);
+router.post('/shifts', createShift);
 router.get('/shifts/export', exportShiftsCsv);
 router.get('/shifts/:shiftId/report', getShiftReport);
 router.put('/shifts/:shiftId', updateShift);

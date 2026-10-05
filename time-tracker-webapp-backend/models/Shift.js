@@ -124,6 +124,11 @@ const shiftSchema = new mongoose.Schema({
     email: { type: String },
     deletedAt: { type: Date }
   },
+  // true when an admin entered this shift for a day the employee forgot to clock in
+  manual: {
+    type: Boolean,
+    default: false
+  },
   // Audit trail for admin corrections (e.g. forgotten clock-outs)
   editedBy: {
     type: mongoose.Schema.Types.ObjectId,

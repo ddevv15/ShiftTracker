@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
+import AddShiftModal from './AddShiftModal';
 import EditShiftModal from './EditShiftModal';
 import ReportModal from './ReportModal';
 import {
@@ -20,6 +21,7 @@ const ShiftsPanel = ({ employees }: Props) => {
   const [isLoading, setIsLoading] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<AdminShift | null>(null);
   const [viewing, setViewing] = useState<AdminShift | null>(null);
   const [sites, setSites] = useState<Array<{ _id: string; name: string }>>([]);
@@ -80,9 +82,12 @@ const ShiftsPanel = ({ employees }: Props) => {
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
       <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
         <h2 className="text-xl font-semibold text-gray-800 dark:text-white">Shifts</h2>
-        <button onClick={exportCsv} disabled={isExporting || data.total === 0} className="btn btn-primary">
-          {isExporting ? 'Exporting…' : `Export ${data.total} to CSV`}
-        </button>
+        <div className="flex gap-2">
+          <button onClick={() => setAdding(true)} className="btn btn-secondary">Add timesheet</button>
+          <button onClick={exportCsv} disabled={isExporting || data.total === 0} className="btn btn-primary">
+            {isExporting ? 'Exporting…' : `Export ${data.total} to CSV`}
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -166,7 +171,13 @@ const ShiftsPanel = ({ employees }: Props) => {
                 <tr key={shift._id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
                   <td className={`${tdClass} font-medium text-gray-800 dark:text-gray-200`}>
                     {shift.employeeName}
-                    {!shift.location && (
+                    {shift.manual && (
+                      <span title={`Added by ${shift.editedBy?.name || 'admin'}: ${shift.editNote || ''}`}
+                        className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 cursor-help">
+                        manual
+                      </span>
+                    )}
+                    {!shift.location && !shift.manual && (
                       <span title="Clocked in without GPS location"
                         className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300 cursor-help">
                         no GPS
@@ -188,7 +199,7 @@ const ShiftsPanel = ({ employees }: Props) => {
                   </td>
                   <td className={tdClass}>
                     {formatDuration(shift.workingTime)}
-                    {shift.editedAt && (
+                    {shift.editedAt && !shift.manual && (
                       <span title={`Edited by ${shift.editedBy?.name || 'admin'}: ${shift.editNote || ''}`}
                         className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300 cursor-help">
                         edited
@@ -245,6 +256,14 @@ const ShiftsPanel = ({ employees }: Props) => {
       )}
 
       {viewing && <ReportModal shift={viewing} onClose={() => setViewing(null)} />}
+
+      {adding && (
+        <AddShiftModal
+          employees={employees}
+          onClose={() => setAdding(false)}
+          onSaved={() => { setAdding(false); load(); }}
+        />
+      )}
 
       {editing && (
         <EditShiftModal
