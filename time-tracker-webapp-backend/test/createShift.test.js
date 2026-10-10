@@ -87,4 +87,13 @@ rejects('negative break', b => { b.breakMinutes = -5; }, { message: /minutes/ })
 rejects('fractional break', b => { b.breakMinutes = 12.5; }, { message: /minutes/ });
 rejects('unknown employee', () => {}, { status: 404, message: /not found/i }, { employee: null });
 rejects('deactivated employee', () => {}, { message: /deactivated/ }, { employee: { _id: employeeId, name: 'Sam', active: false } });
-rejects('overlapping shift', () => {}, { message: /overlap/i }, { overlap: { _id: new mongoose.Types.ObjectId() } });
+rejects('overlapping shift', () => {}, { message: /overlap/i }, { overlap: { _id: new mongoose.Types.ObjectId(), startTime: yesterday(8), endTime: yesterday(12) } });
+rejects('employee still has an open shift', () => {}, { message: /still open/i }, { overlap: { _id: new mongoose.Types.ObjectId(), startTime: yesterday(8), endTime: null } });
+
+test('a shift longer than 24h is saved once the admin confirms it', async () => {
+  const body = { ...valid(), startTime: new Date(Date.now() - 40 * HOUR).toISOString(), endTime: new Date(Date.now() - 10 * HOUR).toISOString() };
+  const first = await run(body);
+  assert.strictEqual(first.res.body.code, 'LONG_SHIFT');
+  const second = await run({ ...body, allowLong: true });
+  assert.strictEqual(second.res.statusCode, 201);
+});

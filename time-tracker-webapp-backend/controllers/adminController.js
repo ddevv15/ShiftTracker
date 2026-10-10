@@ -455,21 +455,29 @@ const exportShiftsCsv = async (req, res, next) => {
  * @param {Date} startTime - proposed shift start
  * @param {Date|null} endTime - proposed shift end (null = shift stays open)
  * @param {Date} now - current server time
- * @returns {string|null} an error message to reject the edit, or null to allow it
+ * @param {object} [options]
+ * @param {boolean} [options.allowLong] - admin confirmed a shift over MAX_SHIFT_HOURS is real
+ * @param {boolean} [options.closingOpen] - closing a forgotten open shift, allowed at any age
+ * @returns {{ message: string, code?: string }|null} why the edit is rejected, or null to allow it
  */
 const MAX_SHIFT_HOURS = Number(process.env.MAX_SHIFT_HOURS) || 24;
 const MAX_EDIT_AGE_DAYS = Number(process.env.MAX_EDIT_AGE_DAYS) || 90;
 const CLOCK_SKEW_MS = 5 * 60 * 1000;
 
-const validateShiftEditPolicy = (startTime, endTime, now) => {
+const validateShiftEditPolicy = (startTime, endTime, now, { allowLong = false, closingOpen = false } = {}) => {
   if (startTime > now.getTime() + CLOCK_SKEW_MS || (endTime && endTime > now.getTime() + CLOCK_SKEW_MS)) {
-    return 'Shift times cannot be in the future';
+    return { message: 'Shift times cannot be in the future' };
   }
-  if (endTime && endTime - startTime > MAX_SHIFT_HOURS * 60 * 60 * 1000) {
-    return `A shift cannot be longer than ${MAX_SHIFT_HOURS} hours`;
+  // Long shifts are usually a typo in the date, so ask before saving rather
+  // than refusing outright (genuine double shifts and late closes happen)
+  if (endTime && !allowLong && endTime - startTime > MAX_SHIFT_HOURS * 60 * 60 * 1000) {
+    return {
+      code: 'LONG_SHIFT',
+      message: `This shift would be ${formatDuration(endTime - startTime)} long, over ${MAX_SHIFT_HOURS} hours. Check the dates, or confirm it really was this long.`
+    };
   }
-  if (now - startTime > MAX_EDIT_AGE_DAYS * 24 * 60 * 60 * 1000) {
-    return `Shifts older than ${MAX_EDIT_AGE_DAYS} days cannot be edited`;
+  if (!closingOpen && now - startTime > MAX_EDIT_AGE_DAYS * 24 * 60 * 60 * 1000) {
+    return { message: `Shifts older than ${MAX_EDIT_AGE_DAYS} days cannot be edited` };
   }
   return null;
 };
@@ -483,6 +491,34 @@ const findOverlappingShift = (employeeId, start, end, excludeShiftId = null) => 
   };
   if (excludeShiftId) query._id = { $ne: excludeShiftId };
   return Shift.findOne(query);
+};
+
+// 400 body naming the shift in the way, so the admin knows what to fix.
+// Times are sent raw; the client formats them in the admin's timezone.
+const overlapResponse = (conflict) => ({
+  code: 'OVERLAP',
+  conflict: {
+    _id: conflict._id,
+    startTime: conflict.startTime,
+    endTime: conflict.endTime || null,
+    open: !conflict.endTime
+  },
+  message: conflict.endTime
+    ? 'This overlaps another shift for this employee'
+    : 'This employee has a shift that is still open from an earlier date. Close that shift first.'
+});
+
+// Keep breaks inside [start, end]: drop ones entirely outside, clamp the rest
+const fitBreaksToShift = (breaks, start, end) => {
+  for (let i = breaks.length - 1; i >= 0; i--) {
+    const item = breaks[i];
+    if ((end && item.startTime >= end) || (item.endTime && item.endTime <= start)) {
+      breaks.splice(i, 1);
+      continue;
+    }
+    if (item.startTime < start) item.startTime = start;
+    if (end && (!item.endTime || item.endTime > end)) item.endTime = end;
+  }
 };
 
 // Admin adds a closed shift for a day the employee forgot to clock in
@@ -519,9 +555,11 @@ const createShift = async (req, res, next) => {
       return res.status(400).json({ message: 'Break must be shorter than the shift' });
     }
 
-    const policyError = validateShiftEditPolicy(start, end, new Date());
+    const policyError = validateShiftEditPolicy(start, end, new Date(), {
+      allowLong: req.body.allowLong === true
+    });
     if (policyError) {
-      return res.status(400).json({ message: policyError });
+      return res.status(400).json(policyError);
     }
 
     const employee = await User.findById(employeeId);
@@ -532,8 +570,9 @@ const createShift = async (req, res, next) => {
       return res.status(400).json({ message: `${employee.name} is deactivated` });
     }
 
-    if (await findOverlappingShift(employee._id, start, end)) {
-      return res.status(400).json({ message: 'This shift would overlap another shift for this employee' });
+    const conflict = await findOverlappingShift(employee._id, start, end);
+    if (conflict) {
+      return res.status(400).json(overlapResponse(conflict));
     }
 
     // Recorded as one short break centred in the shift, so the standard
@@ -595,23 +634,25 @@ const updateShift =async (req, res, next) => {
       return res.status(400).json({ message: 'End time must be after start time' });
     }
 
-    const policyError = validateShiftEditPolicy(newStart, newEnd, new Date());
+    const policyError = validateShiftEditPolicy(newStart, newEnd, new Date(), {
+      allowLong: req.body.allowLong === true,
+      closingOpen: !shift.endTime && newStart.getTime() === shift.startTime.getTime()
+    });
     if (policyError) {
-      return res.status(400).json({ message: policyError });
+      return res.status(400).json(policyError);
     }
 
-    if (await findOverlappingShift(shift.employeeId, newStart, newEnd, shift._id)) {
-      return res.status(400).json({ message: 'This change would overlap another shift for this employee' });
+    const conflict = await findOverlappingShift(shift.employeeId, newStart, newEnd, shift._id);
+    if (conflict) {
+      return res.status(400).json(overlapResponse(conflict));
     }
 
     shift.startTime = newStart;
+    // Also closes any break left open by a forgotten clock-out
+    fitBreaksToShift(shift.breaks, newStart, newEnd);
 
     if (newEnd) {
       shift.endTime = newEnd;
-      // Close any break left open by the forgotten clock-out
-      shift.breaks.forEach(breakItem => {
-        if (!breakItem.endTime) breakItem.endTime = newEnd;
-      });
       shift.onBreak = false;
       shift.breakType = null;
       shift.updateTotals();

@@ -71,6 +71,35 @@ export const filtersToParams = (filters: ShiftFilters) => {
 export const errorMessage = (err: unknown, fallback: string) =>
   (err as { response?: { data?: { message?: string } } })?.response?.data?.message || fallback;
 
+interface ShiftSaveErrorBody {
+  message?: string;
+  code?: 'LONG_SHIFT' | 'OVERLAP';
+  conflict?: { startTime: string; endTime: string | null; open: boolean };
+}
+
+const formatWhen = (value: string) =>
+  new Date(value).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+
+// Error from saving a shift; names the conflicting shift in the admin's timezone
+export const shiftSaveError = (err: unknown, fallback: string) => {
+  const body = (err as { response?: { data?: ShiftSaveErrorBody } })?.response?.data || {};
+  let message = body.message || fallback;
+  if (body.code === 'OVERLAP' && body.conflict) {
+    const { startTime, endTime, open } = body.conflict;
+    message += open
+      ? ` (open since ${formatWhen(startTime)})`
+      : ` (${formatWhen(startTime)} – ${formatWhen(endTime as string)})`;
+  }
+  return { message, needsLongConfirm: body.code === 'LONG_SHIFT' };
+};
+
+// "8h 30m" between two datetime-local values, or null if incomplete/invalid
+export const inputDuration = (start: string, end: string) => {
+  if (!start || !end) return null;
+  const ms = new Date(end).getTime() - new Date(start).getTime();
+  return Number.isFinite(ms) && ms > 0 ? formatDuration(ms) : null;
+};
+
 export const inputClass =
   'w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent';
 

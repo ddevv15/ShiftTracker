@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import axios from 'axios';
-import { AdminShift, errorMessage, inputClass, toLocalInputValue } from './types';
+import { AdminShift, inputClass, inputDuration, shiftSaveError, toLocalInputValue } from './types';
+import LongShiftConfirm from './LongShiftConfirm';
 
 interface Props {
   shift: AdminShift;
@@ -14,6 +15,14 @@ const EditShiftModal = ({ shift, onClose, onSaved }: Props) => {
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [needsLongConfirm, setNeedsLongConfirm] = useState(false);
+  const [allowLong, setAllowLong] = useState(false);
+
+  // Changing the times invalidates an earlier "yes, it was that long"
+  const changeTimes = (setter: (value: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    setter(e.target.value);
+    setAllowLong(false);
+  };
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,15 +33,20 @@ const EditShiftModal = ({ shift, onClose, onSaved }: Props) => {
       await axios.put(`/api/admin/shifts/${shift._id}`, {
         startTime: new Date(startTime).toISOString(),
         endTime: endTime ? new Date(endTime).toISOString() : undefined,
-        note
+        note,
+        allowLong
       });
       onSaved();
     } catch (err) {
-      setError(errorMessage(err, 'Failed to update shift'));
+      const result = shiftSaveError(err, 'Failed to update shift');
+      setError(result.message);
+      setNeedsLongConfirm(result.needsLongConfirm);
     } finally {
       setSaving(false);
     }
   };
+
+  const duration = inputDuration(startTime, endTime);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4" role="dialog" aria-modal="true">
@@ -55,14 +69,20 @@ const EditShiftModal = ({ shift, onClose, onSaved }: Props) => {
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
           Start
           <input type="datetime-local" required className={`${inputClass} mt-1`}
-            value={startTime} onChange={e => setStartTime(e.target.value)} />
+            value={startTime} onChange={changeTimes(setStartTime)} />
         </label>
 
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
           End {shift.open && <span className="text-gray-400 font-normal">(set this to close the shift)</span>}
           <input type="datetime-local" required={!shift.open} className={`${inputClass} mt-1`}
-            value={endTime} onChange={e => setEndTime(e.target.value)} />
+            value={endTime} onChange={changeTimes(setEndTime)} />
         </label>
+
+        {duration && (
+          <p className="text-sm text-gray-500 dark:text-gray-400">Shift length: <strong>{duration}</strong></p>
+        )}
+
+        {needsLongConfirm && <LongShiftConfirm checked={allowLong} onChange={setAllowLong} />}
 
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
           Reason for correction
