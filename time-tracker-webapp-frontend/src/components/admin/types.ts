@@ -37,7 +37,11 @@ export interface ShiftFilters {
   from: string; // YYYY-MM-DD, local date
   to: string;   // YYYY-MM-DD, local date (inclusive)
   hasIssues: boolean;
+  needsReview: boolean;
 }
+
+// Matches the server's default MAX_SHIFT_HOURS; only used to flag rows
+export const LONG_SHIFT_MS = 24 * 60 * 60 * 1000;
 
 export const formatDuration = (ms: number) => {
   const hours = Math.floor(ms / (1000 * 60 * 60));
@@ -59,6 +63,7 @@ export const filtersToParams = (filters: ShiftFilters) => {
   if (filters.employeeId) params.employeeId = filters.employeeId;
   if (filters.siteId) params.siteId = filters.siteId;
   if (filters.hasIssues) params.hasIssues = 'true';
+  if (filters.needsReview) params.needsReview = 'true';
   if (filters.from) params.from = new Date(`${filters.from}T00:00`).toISOString();
   if (filters.to) {
     const end = new Date(`${filters.to}T00:00`);

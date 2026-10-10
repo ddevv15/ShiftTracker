@@ -6,6 +6,10 @@ const { isBootstrapAdmin } = require('../utils/adminEmails');
 const { reportForClient } = require('../utils/reportRules');
 
 const MAX_PAGE_SIZE = 200;
+// Shifts longer than this need admin confirmation and show under "Needs review"
+const MAX_SHIFT_HOURS = Number(process.env.MAX_SHIFT_HOURS) || 24;
+const MAX_EDIT_AGE_DAYS = Number(process.env.MAX_EDIT_AGE_DAYS) || 90;
+const CLOCK_SKEW_MS = 5 * 60 * 1000;
 
 const toPublicUser = (user) => ({
   _id: user._id,
@@ -276,6 +280,15 @@ const buildShiftFilter = (query) => {
     filter['report.issues.0'] = { $exists: true };
   }
 
+  // Shifts an admin likely has to fix: still open, or longer than the
+  // shift limit (usually a forgotten clock-out closed days later)
+  if (query.needsReview === 'true') {
+    filter.$or = [
+      { endTime: null },
+      { $expr: { $gt: [{ $subtract: ['$endTime', '$startTime'] }, MAX_SHIFT_HOURS * 60 * 60 * 1000] } }
+    ];
+  }
+
   return { filter };
 };
 
@@ -460,10 +473,6 @@ const exportShiftsCsv = async (req, res, next) => {
  * @param {boolean} [options.closingOpen] - closing a forgotten open shift, allowed at any age
  * @returns {{ message: string, code?: string }|null} why the edit is rejected, or null to allow it
  */
-const MAX_SHIFT_HOURS = Number(process.env.MAX_SHIFT_HOURS) || 24;
-const MAX_EDIT_AGE_DAYS = Number(process.env.MAX_EDIT_AGE_DAYS) || 90;
-const CLOCK_SKEW_MS = 5 * 60 * 1000;
-
 const validateShiftEditPolicy = (startTime, endTime, now, { allowLong = false, closingOpen = false } = {}) => {
   if (startTime > now.getTime() + CLOCK_SKEW_MS || (endTime && endTime > now.getTime() + CLOCK_SKEW_MS)) {
     return { message: 'Shift times cannot be in the future' };

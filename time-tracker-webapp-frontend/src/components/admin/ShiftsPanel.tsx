@@ -5,7 +5,7 @@ import EditShiftModal from './EditShiftModal';
 import ReportModal from './ReportModal';
 import {
   AdminShift, Employee, ShiftFilters,
-  errorMessage, filtersToParams, formatDuration, inputClass, thClass, tdClass
+  LONG_SHIFT_MS, errorMessage, filtersToParams, formatDuration, inputClass, thClass, tdClass
 } from './types';
 
 const PAGE_SIZE = 25;
@@ -15,7 +15,7 @@ interface Props {
 }
 
 const ShiftsPanel = ({ employees }: Props) => {
-  const [filters, setFilters] = useState<ShiftFilters>({ employeeId: '', siteId: '', from: '', to: '', hasIssues: false });
+  const [filters, setFilters] = useState<ShiftFilters>({ employeeId: '', siteId: '', from: '', to: '', hasIssues: false, needsReview: false });
   const [page, setPage] = useState(1);
   const [data, setData] = useState({ shifts: [] as AdminShift[], pages: 1, total: 0, totalWorkingTime: 0, openCount: 0 });
   const [isLoading, setIsLoading] = useState(true);
@@ -91,7 +91,7 @@ const ShiftsPanel = ({ employees }: Props) => {
       </div>
 
       {/* Filters */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mb-4 items-end">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 mb-4 items-end">
         <label className="text-xs font-medium text-gray-500 dark:text-gray-400">
           Employee
           <select className={`${inputClass} mt-1`} value={filters.employeeId}
@@ -127,6 +127,12 @@ const ShiftsPanel = ({ employees }: Props) => {
             onChange={e => updateFilter('hasIssues', e.target.checked)} />
           Only with issues
         </label>
+        <label className="flex items-center gap-2 h-[38px] text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer"
+          title="Open shifts and shifts longer than 24 hours, usually a forgotten clock-out">
+          <input type="checkbox" className="h-4 w-4 accent-amber-600" checked={filters.needsReview}
+            onChange={e => updateFilter('needsReview', e.target.checked)} />
+          Needs review
+        </label>
       </div>
 
       {/* Range summary */}
@@ -136,6 +142,11 @@ const ShiftsPanel = ({ employees }: Props) => {
         {data.openCount > 0 && (
           <span className="text-amber-600 dark:text-amber-400">
             <strong>{data.openCount}</strong> still open
+            {!filters.needsReview && (
+              <button type="button" onClick={() => updateFilter('needsReview', true)} className="ml-2 underline">
+                Review
+              </button>
+            )}
           </span>
         )}
       </div>
@@ -199,6 +210,12 @@ const ShiftsPanel = ({ employees }: Props) => {
                   </td>
                   <td className={tdClass}>
                     {formatDuration(shift.workingTime)}
+                    {shift.endTime && new Date(shift.endTime).getTime() - new Date(shift.startTime).getTime() > LONG_SHIFT_MS && (
+                      <span title="Longer than 24 hours, possibly a forgotten clock-out. Use Edit to correct the end time."
+                        className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200 cursor-help">
+                        over 24h
+                      </span>
+                    )}
                     {shift.editedAt && !shift.manual && (
                       <span title={`Edited by ${shift.editedBy?.name || 'admin'}: ${shift.editNote || ''}`}
                         className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300 cursor-help">
